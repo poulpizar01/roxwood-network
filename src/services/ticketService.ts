@@ -4,13 +4,36 @@ import { prisma } from "../db/prisma.js";
 import { logger } from "../utils/logger.js";
 import { dispatchWebhook } from "./webhookDispatcher.js";
 
+/**
+ * Service central du cycle de vie d'un ticket : creation/detection, fermeture, suivi d'activite.
+ * Ticket Tool n'ayant pas d'API, tout est deduit d'evenements Discord (voir src/events/).
+ */
+
+/**
+ * Devine l'utilisateur ayant ouvert le ticket a partir des permission overwrites du canal.
+ * Ticket Tool accorde un acces explicite (overwrite de type "membre") au client qui ouvre
+ * le ticket ; on prend donc le premier overwrite de type membre qui n'est pas le bot lui-meme.
+ * Best-effort : retourne `null` si aucun overwrite pertinent n'est trouve.
+ */
 function guessOpenerId(channel: NonThreadGuildBasedChannel): string | null {
   const botUserId = channel.client.user?.id;
   const overwrites = [...channel.permissionOverwrites.cache.values()] as PermissionOverwrites[];
+  // type === 1 correspond a OverwriteType.Member (0 = Role) dans discord.js.
   const memberOverwrite = overwrites.find((overwrite) => overwrite.type === 1 && overwrite.id !== botUserId);
   return memberOverwrite?.id ?? null;
 }
 
+/**
+ * Enregistre un nouveau canal comme ticket suivi, si ce n'est pas deja fait.
+ * Appele depuis `onChannelCreate` une fois qu'on sait (via `getCategoryType`) que la
+ * categorie du canal correspond a un type de ticket connu (RECRUITMENT ou SERVICE).
+ *
+ * @param channel - canal Discord nouvellement cree
+ * @param categoryId - id de la categorie parente (deja verifiee comme suivie par l'appelant)
+ * @param type - type de ticket determine par la config de la guilde
+ * @returns le `Ticket` cree, ou `null` si ce canal etait deja suivi (evite les doublons
+ *   si l'evenement channelCreate est re-livre par Discord)
+ */
 export async function trackTicketChannel(
   channel: NonThreadGuildBasedChannel,
   categoryId: string,
@@ -41,6 +64,12 @@ export async function trackTicketChannel(
   return ticket;
 }
 
+/**
+ * Marque un ticket comme ferme (statut CLOSED + horodatage) et notifie les webhooks abonnes.
+ * No-op silencieux si le canal n'est pas un ticket suivi, ou s'il est deja marque ferme
+ * (evite les doubles notifications si plusieurs signaux de fermeture se declenchent, ex:
+ * renommage puis suppression du canal).
+ */
 export async function markTicketClosed(channelId: string, guildId: string): Promise<void> {
   const ticket = await prisma.ticket.findUnique({ where: { channelId } });
   if (!ticket || ticket.status === "CLOSED") return;
@@ -55,6 +84,11 @@ export async function markTicketClosed(channelId: string, guildId: string): Prom
   await dispatchWebhook(guildId, "ticket.closed", { ticketId: ticket.id, channelId });
 }
 
+/**
+ * Met a jour `lastActivityAt` du ticket associe a ce canal (appele a chaque message).
+ * Sert de base au calcul d'escalade (voir `escalationService.ts`) : un ticket est considere
+ * "stale" quand ce timestamp est trop ancien sans reponse staff.
+ */
 export async function recordActivity(channelId: string): Promise<void> {
   await prisma.ticket.updateMany({
     where: { channelId },
@@ -62,6 +96,11 @@ export async function recordActivity(channelId: string): Promise<void> {
   });
 }
 
+/**
+ * Renseigne `firstStaffReplyAt` la premiere fois qu'un membre du staff repond dans le ticket.
+ * La clause `firstStaffReplyAt: null` dans le `where` rend l'operation idempotente : les
+ * appels suivants (2e, 3e reponse staff...) ne modifient plus rien.
+ */
 export async function recordFirstStaffReply(channelId: string): Promise<void> {
   await prisma.ticket.updateMany({
     where: { channelId, firstStaffReplyAt: null },
@@ -69,6 +108,11 @@ export async function recordFirstStaffReply(channelId: string): Promise<void> {
   });
 }
 
+/**
+ * Recupere le ticket associe a un canal Discord (avec ses tags), ou `undefined`/`null`
+ * si ce canal n'est pas suivi. Point d'entree utilise par la quasi-totalite des commandes
+ * et handlers d'interaction pour savoir "sur quel ticket suis-je en train d'agir ?".
+ */
 export async function getTicketByChannel(channelId: string) {
   return prisma.ticket.findUnique({
     where: { channelId },

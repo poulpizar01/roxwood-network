@@ -5,8 +5,15 @@ import { getTicketByChannel } from "../services/ticketService.js";
 import { getApplication } from "../services/recruitmentService.js";
 import { computeTotal, getOrderByTicket } from "../services/orderService.js";
 
+/** Niveaux de priorite disponibles pour un ticket, tous types confondus. */
 const PRIORITY_CHOICES = ["LOW", "NORMAL", "HIGH", "URGENT"] as const;
 
+/**
+ * Construit l'embed de resume affiche par `/ticket info` : champs generiques communs a
+ * tout ticket (type, statut, priorite, tags, opener, delai 1ere reponse), completes par
+ * un bloc specifique au type (candidature pour RECRUITMENT, commande pour SERVICE).
+ * Retourne `null` si le canal n'est pas un ticket suivi.
+ */
 async function buildTicketSummary(channelId: string) {
   const ticket = await getTicketByChannel(channelId);
   if (!ticket) return null;
@@ -47,6 +54,12 @@ async function buildTicketSummary(channelId: string) {
   return embed;
 }
 
+/**
+ * `/ticket` : commande generique utilisable dans n'importe quel ticket suivi (recrutement
+ * ou service), pour consulter son etat (`info`), fixer sa priorite, ou gerer ses tags libres.
+ * Contrairement aux commandes `/recruitment` et `/order`, celle-ci ne restreint pas le type
+ * de ticket : priorite et tags ont un sens quel que soit le flux.
+ */
 export const ticketCommand: Command = {
   data: new SlashCommandBuilder()
     .setName("ticket")
@@ -111,6 +124,7 @@ export const ticketCommand: Command = {
       const tagName = interaction.options.getString("tag", true).toLowerCase().trim();
 
       if (sub === "add") {
+        // upsert : ajouter deux fois le meme tag ne cree pas de doublon (contrainte unique ticketId+tag).
         await prisma.ticketTag.upsert({
           where: { ticketId_tag: { ticketId: ticket.id, tag: tagName } },
           create: { ticketId: ticket.id, tag: tagName },

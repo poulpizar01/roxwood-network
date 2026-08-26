@@ -1,6 +1,18 @@
 import type { CatalogItem, CatalogItemField, OrderStatus, PaymentStatus } from "@prisma/client";
 import { prisma } from "../db/prisma.js";
 
+/**
+ * Service de gestion de la commande (`ServiceOrder`, 1:1 avec un `Ticket` de type SERVICE)
+ * et de ses lignes (`OrderItem`). Le flux principal est cote client (self-service : select
+ * menu + modal, voir `interactionCreate.ts`) ; les commandes `/order` restent pour les
+ * corrections manuelles du staff.
+ */
+
+/**
+ * Recupere la commande d'un ticket, ou la cree si elle n'existe pas encore (statut
+ * PENDING/UNPAID par defaut). Appele des l'ouverture d'un ticket SERVICE, avant meme
+ * que le client n'ait ajoute le moindre article.
+ */
 export async function getOrCreateOrder(ticketId: string) {
   const existing = await prisma.serviceOrder.findUnique({ where: { ticketId } });
   if (existing) return existing;
@@ -8,12 +20,26 @@ export async function getOrCreateOrder(ticketId: string) {
   return prisma.serviceOrder.create({ data: { ticketId } });
 }
 
+/**
+ * Ajoute une ligne de commande a partir des reponses du client au modal dynamique genere
+ * pour un article de catalogue. Separe la reponse du champ QUANTITY (si present) des autres :
+ * la premiere alimente `OrderItem.quantity` (utilise dans le calcul du prix), les secondes
+ * sont stockees telles quelles comme `OrderItemAnswer` (affichees ensuite sur la facture).
+ * `name`/`unitPrice` sont copies (snapshot) depuis le catalogue au moment de la commande,
+ * pour que le prix facture reste correct meme si l'article catalogue change ensuite.
+ *
+ * @param orderId - commande a laquelle rattacher la ligne
+ * @param catalogItem - article choisi par le client
+ * @param answers - reponses du client, chacune associee au `CatalogItemField` correspondant
+ */
 export async function addItemFromAnswers(
   orderId: string,
   catalogItem: CatalogItem,
   answers: { field: CatalogItemField; value: string }[]
 ) {
   const quantityAnswer = answers.find((a) => a.field.style === "QUANTITY");
+  // parseInt peut renvoyer NaN sur une saisie non numerique ; on retombe alors sur 1 plutot
+  // que de propager NaN dans le calcul du total.
   const quantity = quantityAnswer ? Math.max(1, parseInt(quantityAnswer.value, 10) || 1) : 1;
   const otherAnswers = answers.filter((a) => a.field.style !== "QUANTITY");
 
@@ -32,6 +58,11 @@ export async function addItemFromAnswers(
   });
 }
 
+/**
+ * Ajoute une ligne de commande manuellement (sans passer par le formulaire client), pour
+ * le cas exceptionnel ou le staff doit corriger/completer une commande depuis `/order add-item`.
+ * Ne cree aucune `OrderItemAnswer` (pas de reponses a des champs personnalises dans ce cas).
+ */
 export async function addItem(orderId: string, catalogItem: CatalogItem, quantity = 1) {
   return prisma.orderItem.create({
     data: {
@@ -44,18 +75,22 @@ export async function addItem(orderId: string, catalogItem: CatalogItem, quantit
   });
 }
 
+/** Retire une ligne de commande (`/order remove-item`, correction staff). */
 export async function removeItem(orderItemId: string) {
   await prisma.orderItem.delete({ where: { id: orderItemId } });
 }
 
+/** Change le statut logistique de la commande (PENDING / PREPARING / DELIVERED / CANCELLED). */
 export async function setStatus(orderId: string, status: OrderStatus) {
   return prisma.serviceOrder.update({ where: { id: orderId }, data: { status } });
 }
 
+/** Change le statut de paiement (UNPAID / PAID). Passer a PAID declenche la generation de facture (voir order.ts). */
 export async function setPaymentStatus(orderId: string, paymentStatus: PaymentStatus) {
   return prisma.serviceOrder.update({ where: { id: orderId }, data: { paymentStatus } });
 }
 
+/** Recupere une commande par son id, avec ses lignes et les reponses de chacune. */
 export async function getOrderWithItems(orderId: string) {
   return prisma.serviceOrder.findUnique({
     where: { id: orderId },
@@ -63,6 +98,7 @@ export async function getOrderWithItems(orderId: string) {
   });
 }
 
+/** Recupere la commande d'un ticket par son id de ticket, avec ses lignes et reponses. */
 export async function getOrderByTicket(ticketId: string) {
   return prisma.serviceOrder.findUnique({
     where: { ticketId },
@@ -70,10 +106,16 @@ export async function getOrderByTicket(ticketId: string) {
   });
 }
 
+/** Calcule le total d'une commande (somme de `unitPrice * quantity` sur toutes les lignes). */
 export function computeTotal(order: { items: { unitPrice: number; quantity: number }[] }): number {
   return order.items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
 }
 
+/**
+ * Genere et persiste un numero de facture unique pour la commande, base sur l'horodatage
+ * courant encode en base 36 (compact, lisible, sans avoir besoin d'un compteur transactionnel
+ * partage entre guildes). Format : `INV-<timestamp base36 majuscule>`.
+ */
 export async function setInvoiceNumber(orderId: string): Promise<string> {
   const invoiceNumber = `INV-${Date.now().toString(36).toUpperCase()}`;
   await prisma.serviceOrder.update({ where: { id: orderId }, data: { invoiceNumber } });

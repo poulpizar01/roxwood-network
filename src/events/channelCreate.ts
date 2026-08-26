@@ -14,6 +14,10 @@ import { getOrCreateOrder } from "../services/orderService.js";
 import { listActive } from "../services/catalogService.js";
 import { logger } from "../utils/logger.js";
 
+/**
+ * Poste le message d'accueil d'un ticket de recrutement : un bouton qui, une fois clique,
+ * ouvre le modal de candidature (voir `handleRecruitmentStartForm` dans interactionCreate.ts).
+ */
 async function postRecruitmentIntro(channel: NonThreadGuildBasedChannel): Promise<void> {
   if (!channel.isTextBased()) return;
 
@@ -31,6 +35,12 @@ async function postRecruitmentIntro(channel: NonThreadGuildBasedChannel): Promis
   await channel.send({ embeds: [embed], components: [row] });
 }
 
+/**
+ * Poste le message d'accueil d'un ticket de service : un menu deroulant listant le
+ * catalogue actif, point de depart du flux de commande self-service cote client
+ * (voir `handleOrderSelectItem` dans interactionCreate.ts). Si le catalogue est vide,
+ * affiche un message simple sans menu (rien a commander tant que le staff n'a rien configure).
+ */
 async function postServiceIntro(channel: NonThreadGuildBasedChannel): Promise<void> {
   if (!channel.isTextBased()) return;
 
@@ -49,6 +59,7 @@ async function postServiceIntro(channel: NonThreadGuildBasedChannel): Promise<vo
     .setCustomId("order:select-item")
     .setPlaceholder("Choisir un article")
     .addOptions(
+      // Un StringSelectMenu Discord accepte au plus 25 options.
       items.slice(0, 25).map((item) => ({
         label: item.name.slice(0, 100),
         description: `${item.price.toLocaleString("fr-FR")} $`,
@@ -60,6 +71,16 @@ async function postServiceIntro(channel: NonThreadGuildBasedChannel): Promise<vo
   await channel.send({ embeds: [embed], components: [row] });
 }
 
+/**
+ * Handler de l'evenement `channelCreate` : coeur de la detection de ticket puisque
+ * Ticket Tool n'a pas d'API. Ignore tout canal qui n'est ni un salon texte, ni situe
+ * dans une categorie mappee a un type de ticket (`getCategoryType`) — c'est ce qui
+ * permet au bot de laisser les autres boutons du panel Ticket Tool (ex: "Partenariat",
+ * "Article") geres par Ticket Tool seul, hors de son perimetre.
+ *
+ * Une fois le ticket detecte et enregistre (`trackTicketChannel`), cree l'enregistrement
+ * specifique au type (candidature ou commande) et poste le message d'accueil correspondant.
+ */
 export async function onChannelCreate(channel: NonThreadGuildBasedChannel): Promise<void> {
   if (channel.type !== ChannelType.GuildText) return;
 

@@ -2,6 +2,11 @@ import { PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
 import type { Command } from "./types.js";
 import { prisma } from "../db/prisma.js";
 
+/**
+ * `/autoreply` : commande d'administration (reservee `ManageGuild`) pour gerer les regles
+ * de reponse automatique par mot-cle (voir `autoReplyService.ts`), declenchees quand le
+ * client ouvrant un ticket ecrit un message contenant le mot-cle configure.
+ */
 export const autoreplyCommand: Command = {
   data: new SlashCommandBuilder()
     .setName("autoreply")

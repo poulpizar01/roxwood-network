@@ -2,12 +2,33 @@ import { createHmac } from "node:crypto";
 import { prisma } from "../db/prisma.js";
 import { logger } from "../utils/logger.js";
 
+/**
+ * Point de branchement generique vers des systemes externes (CRM, site web...) : chaque
+ * guilde peut abonner des URLs a des types d'evenements via `WebhookSubscription`. Aucune
+ * integration specifique n'est codee en dur ici, volontairement.
+ */
+
+/** Types d'evenements pouvant declencher l'envoi d'un webhook. */
 export type WebhookEventType = "ticket.created" | "ticket.closed" | "ticket.escalated";
 
+/**
+ * Signe le corps de la requete en HMAC-SHA256 avec le secret propre a chaque abonnement,
+ * pour que le service externe puisse verifier l'authenticite de l'appel (header `X-Signature-256`).
+ */
 function sign(secret: string, body: string): string {
   return createHmac("sha256", secret).update(body).digest("hex");
 }
 
+/**
+ * Envoie `payload` (en POST JSON signe) a tous les webhooks actifs de la guilde abonnes
+ * a ce type d'evenement. Les envois sont paralleles et independants : l'echec d'un
+ * abonnement (timeout, 4xx/5xx, exception reseau) est logge mais n'empeche pas les autres
+ * d'etre notifies, et ne fait jamais echouer l'appelant (pas de throw).
+ *
+ * @param guildId - guilde d'origine de l'evenement
+ * @param eventType - type d'evenement (voir `WebhookEventType`)
+ * @param payload - donnees specifiques a l'evenement, serialisees telles quelles dans le body
+ */
 export async function dispatchWebhook(
   guildId: string,
   eventType: WebhookEventType,

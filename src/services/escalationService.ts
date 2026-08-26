@@ -5,6 +5,18 @@ import { prisma } from "../db/prisma.js";
 import { logger } from "../utils/logger.js";
 import { dispatchWebhook } from "./webhookDispatcher.js";
 
+/**
+ * Job planifie qui ping le staff sur les tickets restes trop longtemps sans reponse.
+ * Ne fait rien pour les guildes qui n'ont pas configure `escalationMinutes` (voir
+ * `guildConfigService.setEscalationMinutes`).
+ */
+
+/**
+ * Parcourt toutes les guildes ayant une escalade active et, pour chacune, escalade
+ * (ping + marque `escalatedAt`) les tickets ouverts sans reponse staff depuis plus
+ * longtemps que le seuil configure. `escalatedAt` deja renseigne = deja escalade,
+ * on ne ping donc jamais deux fois le meme ticket.
+ */
 async function checkStaleTickets(client: Client): Promise<void> {
   const configs = await prisma.guildConfig.findMany({
     where: { escalationMinutes: { not: null } },
@@ -51,6 +63,11 @@ async function checkStaleTickets(client: Client): Promise<void> {
   }
 }
 
+/**
+ * Demarre le job d'escalade (verification toutes les 5 minutes). A appeler une seule fois
+ * au demarrage du bot (voir `onReady`), en lui passant le client Discord deja connecte
+ * (necessaire pour recuperer les canaux et y poster les pings).
+ */
 export function startEscalationJob(client: Client): void {
   // toutes les 5 minutes
   cron.schedule("*/5 * * * *", () => {

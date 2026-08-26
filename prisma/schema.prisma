@@ -7,24 +7,33 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Configuration du bot pour un serveur Discord donne (une ligne par guilde, isolation
+/// multi-serveur : toutes les autres tables referencent `guildId` et sont filtrees dessus).
 model GuildConfig {
   id                String   @id @default(cuid())
+  /// Id de la guilde Discord, cle metier utilisee partout ailleurs dans le code (pas `id`).
   guildId           String   @unique
+  /// Roles consideres comme "staff" (temps de reponse, escalade, notifications de commande).
   staffRoleIds      String[]
+  /// Delai (minutes) sans reponse staff avant escalade d'un ticket. `null` = escalade desactivee.
   escalationMinutes Int?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  tickets         Ticket[]
-  autoReplyRules  AutoReplyRule[]
-  webhooks        WebhookSubscription[]
+  tickets          Ticket[]
+  autoReplyRules   AutoReplyRule[]
+  webhooks         WebhookSubscription[]
   ticketCategories TicketCategoryConfig[]
-  catalogItems    CatalogItem[]
+  catalogItems     CatalogItem[]
 }
 
+/// Associe une categorie Discord a un type de ticket. Une categorie absente de cette table
+/// n'est pas suivie par le bot (les autres boutons du panel Ticket Tool restent geres par
+/// Ticket Tool seul, hors perimetre).
 model TicketCategoryConfig {
   id         String     @id @default(cuid())
   guildId    String
+  /// Id de la categorie Discord (celle utilisee par un bouton du panel Ticket Tool).
   categoryId String
   type       TicketType
 
@@ -33,24 +42,36 @@ model TicketCategoryConfig {
   @@unique([guildId, categoryId])
 }
 
+/// Les deux usages construits par-dessus Ticket Tool.
 enum TicketType {
+  /// Candidature : formulaire client + pipeline de suivi staff (voir RecruitmentApplication).
   RECRUITMENT
+  /// Commande : catalogue + composition self-service par le client (voir ServiceOrder).
   SERVICE
 }
 
+/// Un ticket suivi (canal Discord cree par Ticket Tool dans une categorie mappee).
+/// Porte les champs generiques communs aux deux types ; les details specifiques vivent
+/// dans `application` (RECRUITMENT) ou `order` (SERVICE), en relation 1:1 optionnelle.
 model Ticket {
   id                String         @id @default(cuid())
   guildId           String
+  /// Id du canal Discord, cle utilisee par la quasi-totalite du code pour retrouver un ticket.
   channelId         String         @unique
   categoryId        String
   type              TicketType
+  /// Utilisateur ayant ouvert le ticket, devine via les permission overwrites du canal
+  /// (best-effort : peut etre `null` si non determinable).
   openerId          String?
   status            TicketStatus   @default(OPEN)
   priority          TicketPriority @default(NORMAL)
   createdAt         DateTime       @default(now())
   closedAt          DateTime?
+  /// Renseigne a la 1ere reponse d'un membre du staff (base du calcul de temps de reponse et d'escalade).
   firstStaffReplyAt DateTime?
+  /// Mis a jour a chaque message dans le ticket ; sert de reference pour detecter l'inactivite (escalade).
   lastActivityAt    DateTime       @default(now())
+  /// Renseigne des qu'une escalade a ete declenchee, pour ne jamais re-escalader le meme ticket.
   escalatedAt       DateTime?
 
   guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
@@ -62,6 +83,7 @@ model Ticket {
   @@index([guildId, type])
 }
 
+/// Tag libre pose sur un ticket (`/ticket tag add|remove`), independant du type de ticket.
 model TicketTag {
   id       String @id @default(cuid())
   ticketId String
@@ -72,10 +94,14 @@ model TicketTag {
   @@unique([ticketId, tag])
 }
 
+/// Regle de reponse automatique par mot-cle (`/autoreply`), declenchee sur les messages
+/// du client ouvrant le ticket.
 model AutoReplyRule {
   id        String   @id @default(cuid())
   guildId   String
+  /// Mot-cle recherche (comparaison insensible a la casse, sous-chaine).
   trigger   String
+  /// Reponse envoyee telle quelle quand le trigger matche.
   response  String
   enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -85,11 +111,15 @@ model AutoReplyRule {
   @@index([guildId, enabled])
 }
 
+/// Abonnement d'une URL externe (CRM, site...) a un type d'evenement de ticket. Point de
+/// branchement generique : voir `webhookDispatcher.ts` pour l'envoi (POST JSON signe HMAC).
 model WebhookSubscription {
   id        String   @id @default(cuid())
   guildId   String
+  /// Type d'evenement declencheur (ex: "ticket.created", "ticket.closed", "ticket.escalated").
   eventType String
   url       String
+  /// Secret utilise pour signer le corps de la requete (header X-Signature-256).
   secret    String
   enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -111,11 +141,16 @@ enum TicketPriority {
   URGENT
 }
 
+/// Candidature associee a un ticket RECRUITMENT (relation 1:1). Cree des l'ouverture du
+/// ticket, remplie ensuite par le formulaire client (`answers`) et pilotee par le staff
+/// (`status`, `recruiterId`).
 model RecruitmentApplication {
   id          String            @id @default(cuid())
   ticketId    String            @unique
   status      ApplicationStatus @default(PENDING)
+  /// Membre du staff s'etant assigne la candidature (`/recruitment claim`). `null` = non assignee.
   recruiterId String?
+  /// Renseigne quand le candidat soumet le formulaire (peut rester `null` s'il n'a pas encore repondu).
   submittedAt DateTime?
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
@@ -124,15 +159,18 @@ model RecruitmentApplication {
   answers RecruitmentAnswer[]
 }
 
+/// Une reponse du candidat a une question du formulaire de candidature.
 model RecruitmentAnswer {
   id            String @id @default(cuid())
   applicationId String
+  /// Libelle de la question (copie du formulaire au moment de la soumission).
   question      String
   answer        String
 
   application RecruitmentApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 }
 
+/// Etapes du pipeline de recrutement, dans l'ordre attendu.
 enum ApplicationStatus {
   PENDING
   INTERVIEW
@@ -140,13 +178,20 @@ enum ApplicationStatus {
   REJECTED
 }
 
+/// Article du catalogue configure par le staff (`/catalog`) : ce que le client peut
+/// commander lui-meme dans un ticket SERVICE. Chaque article peut definir ses propres
+/// champs a remplir par le client (`fields`), pour s'adapter a des produits/services
+/// tres differents (ex: location de salle vs commande de menus).
 model CatalogItem {
   id          String   @id @default(cuid())
   guildId     String
   name        String
   description String?
+  /// Prix unitaire, en devise in-game (entier, pas de sous-unite/centimes).
   price       Int
+  /// URL de la photo de l'article (attachment Discord au moment de `/catalog add`).
   imageUrl    String?
+  /// Permet de retirer un article du menu deroulant client sans supprimer son historique de commandes.
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
 
@@ -157,32 +202,41 @@ model CatalogItem {
   @@index([guildId, active])
 }
 
-// Champs definis par le staff pour un article donne : ce que le client doit remplir
-// en le commandant. Max 5 par article (limite Discord : un modal a au plus 5 champs).
+/// Champ personnalise defini par le staff pour un article donne : ce que le client doit
+/// remplir en le commandant (ex: date + nb invites pour une salle, quantite + boisson pour
+/// un menu). Max 5 par article — limite Discord : un modal a au plus 5 TextInputComponent.
 model CatalogItemField {
   id            String            @id @default(cuid())
   catalogItemId String
   label         String
   style         CatalogFieldStyle
   required      Boolean           @default(true)
+  /// Ordre d'affichage dans le modal genere dynamiquement (0 = premier champ).
   position      Int               @default(0)
 
   catalogItem CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
 }
 
-// QUANTITY est un style special : sa reponse alimente OrderItem.quantity (utilise dans le calcul du prix)
-// au lieu d'etre juste stockee comme reponse libre. Au plus un champ QUANTITY par article (verifie en code).
+/// Style d'un champ personnalise de catalogue. QUANTITY est special : sa reponse alimente
+/// `OrderItem.quantity` (utilise dans le calcul du prix) au lieu d'etre juste stockee comme
+/// reponse libre. Au plus un champ QUANTITY par article (regle verifiee en code, pas en DB).
 enum CatalogFieldStyle {
   SHORT
   PARAGRAPH
   QUANTITY
 }
 
+/// Commande associee a un ticket SERVICE (relation 1:1). Creee des l'ouverture du ticket,
+/// composee ensuite par le client lui-meme (self-service) via le menu deroulant + formulaires
+/// dynamiques ; le staff ne fait que confirmer le paiement, ce qui declenche la facture.
 model ServiceOrder {
   id            String        @id @default(cuid())
   ticketId      String        @unique
+  /// Statut logistique (preparation/livraison), independant du statut de paiement.
   status        OrderStatus   @default(PENDING)
   paymentStatus PaymentStatus @default(UNPAID)
+  /// Numero de facture, genere (et fige) a la premiere generation de facture. `null` tant
+  /// qu'aucune facture n'a jamais ete emise pour cette commande.
   invoiceNumber String?       @unique
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
@@ -191,6 +245,10 @@ model ServiceOrder {
   items  OrderItem[]
 }
 
+/// Une ligne de commande. `name`/`unitPrice` sont un instantane (snapshot) de l'article
+/// catalogue au moment de la commande : la facture reste donc correcte meme si le prix ou
+/// le nom de l'article catalogue change plus tard, ou si l'article est supprime
+/// (`catalogItemId` passe alors a `null` via onDelete: SetNull, sans perdre la ligne).
 model OrderItem {
   id            String  @id @default(cuid())
   orderId       String
@@ -204,10 +262,12 @@ model OrderItem {
   answers     OrderItemAnswer[]
 }
 
-// Reponses du client aux champs configures (hors QUANTITY, qui va dans OrderItem.quantity).
+/// Reponse du client a un champ personnalise de l'article commande (hors champ QUANTITY,
+/// qui est stocke directement dans `OrderItem.quantity`). Affichee sur la facture generee.
 model OrderItemAnswer {
   id          String @id @default(cuid())
   orderItemId String
+  /// Libelle du champ (copie du `CatalogItemField.label` au moment de la commande).
   question    String
   answer      String
 

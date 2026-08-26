@@ -3,6 +3,7 @@ import type { Command } from "./types.js";
 import { getTicketByChannel } from "../services/ticketService.js";
 import { setStatus, assignRecruiter } from "../services/recruitmentService.js";
 
+/** Etapes du pipeline de recrutement, dans l'ordre attendu (voir enum Prisma `ApplicationStatus`). */
 const STATUS_CHOICES = [
   { name: "En attente", value: "PENDING" },
   { name: "Entretien", value: "INTERVIEW" },
@@ -10,6 +11,12 @@ const STATUS_CHOICES = [
   { name: "Refuse", value: "REJECTED" },
 ] as const;
 
+/**
+ * `/recruitment` : commande staff pour piloter le pipeline d'une candidature (avancer son
+ * statut, se l'assigner). Utilisable uniquement dans le salon d'un ticket de type RECRUITMENT
+ * — c'est le ticket courant qui determine implicitement de quelle candidature il s'agit,
+ * pas d'identifiant a fournir en parametre.
+ */
 export const recruitmentCommand: Command = {
   data: new SlashCommandBuilder()
     .setName("recruitment")

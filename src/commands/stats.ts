@@ -2,6 +2,11 @@ import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
 import type { Command } from "./types.js";
 import { prisma } from "../db/prisma.js";
 
+/**
+ * `/stats` : commande de consultation, tous types de tickets confondus (recrutement et
+ * service). Calcule les compteurs directement en base (agregats Prisma) plutot que de
+ * charger tous les tickets en memoire.
+ */
 export const statsCommand: Command = {
   data: new SlashCommandBuilder()
     .setName("stats")
@@ -22,6 +27,8 @@ export const statsCommand: Command = {
       select: { createdAt: true, firstStaffReplyAt: true },
     });
 
+    // Moyenne du delai (creation -> 1ere reponse staff) en minutes, sur les seuls tickets
+    // qui ont deja recu une reponse (sinon la moyenne n'aurait pas de sens).
     const avgResponseMinutes =
       respondedTickets.length > 0
         ? Math.round(

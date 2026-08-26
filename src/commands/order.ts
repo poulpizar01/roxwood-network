@@ -13,6 +13,7 @@ import {
 } from "../services/orderService.js";
 import { renderInvoice } from "../services/invoiceImageService.js";
 
+/** Statuts logistiques disponibles pour une commande (independants du statut de paiement). */
 const ORDER_STATUS_CHOICES = [
   { name: "En attente", value: "PENDING" },
   { name: "En preparation", value: "PREPARING" },
@@ -20,6 +21,13 @@ const ORDER_STATUS_CHOICES = [
   { name: "Annulee", value: "CANCELLED" },
 ] as const;
 
+/**
+ * Genere l'image de facture (via `renderInvoice`) et la poste dans le salon du ticket.
+ * Reutilise le numero de facture existant s'il y en a deja un (ex: `/order invoice` apres
+ * un premier `/order paid`), pour eviter que renvoyer la facture n'en change le numero.
+ * Resout le pseudo affiche du client (fallback "Client" si le membre a quitte le serveur
+ * ou si l'opener n'a pas pu etre determine a l'ouverture du ticket).
+ */
 async function sendInvoice(
   interaction: ChatInputCommandInteraction,
   ticket: { openerId: string | null },
@@ -58,6 +66,14 @@ async function sendInvoice(
   }
 }
 
+/**
+ * `/order` : commande staff de correction/finalisation d'une commande. Le flux principal
+ * de composition d'une commande est cote client (select menu + modal, voir
+ * `interactionCreate.ts`) — cette commande sert aux ajustements manuels exceptionnels
+ * (`add-item`/`remove-item`), au suivi logistique (`status`), et surtout a la confirmation
+ * de paiement (`paid`) qui declenche la generation automatique de la facture.
+ * Utilisable uniquement dans le salon d'un ticket de type SERVICE.
+ */
 export const orderCommand: Command = {
   data: new SlashCommandBuilder()
     .setName("order")
@@ -142,6 +158,8 @@ export const orderCommand: Command = {
         return;
       }
       await setPaymentStatus(order.id, "PAID");
+      // deferReply : le rendu de l'image (canvas) + son upload peuvent depasser le delai
+      // de 3s avant lequel Discord attend une premiere reponse a l'interaction.
       await interaction.deferReply();
       const updated = await getOrderByTicket(ticket.id);
       await sendInvoice(interaction, ticket, updated);

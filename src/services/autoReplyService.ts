@@ -1,6 +1,14 @@
 import { prisma } from "../db/prisma.js";
 
+/**
+ * Reponses automatiques par mot-cle dans les tickets (generique, independant des flux
+ * Recrutement/Service). Concu comme un point d'extension : `AutoReplyMatcher` est une
+ * interface pluggable, `keywordMatcher` en est la seule implementation fournie pour
+ * l'instant ; un futur matcher IA (ex: appel a l'API Claude) pourrait etre ajoute sans
+ * toucher au reste du code (event `messageCreate`, commandes `/autoreply`).
+ */
 export interface AutoReplyMatcher {
+  /** Retourne la reponse a envoyer si le message matche une regle, sinon `null`. */
   match(guildId: string, messageContent: string): Promise<string | null>;
 }
 
@@ -19,6 +27,11 @@ export const keywordMatcher: AutoReplyMatcher = {
 // Le premier matcher a repondre gagne.
 const matchers: AutoReplyMatcher[] = [keywordMatcher];
 
+/**
+ * Essaie chaque matcher dans l'ordre et retourne la premiere reponse trouvee (ou `null`
+ * si aucun matcher ne repond). Utilise par `onMessageCreate` pour repondre automatiquement
+ * aux messages du client ouvrant le ticket.
+ */
 export async function findAutoReply(guildId: string, messageContent: string): Promise<string | null> {
   for (const matcher of matchers) {
     const response = await matcher.match(guildId, messageContent);

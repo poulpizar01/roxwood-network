@@ -17,8 +17,20 @@ import { addItemFromAnswers, computeTotal, getOrCreateOrder, getOrderByTicket } 
 import { getGuildConfig } from "../services/guildConfigService.js";
 import { logger } from "../utils/logger.js";
 
+/**
+ * Point d'entree unique pour toutes les interactions Discord (commandes slash, boutons,
+ * menus deroulants, soumissions de modal). Route chaque interaction vers son handler dedie
+ * en fonction de son type et de son `customId`. C'est ici que vivent les deux flux
+ * conversationnels a plusieurs etapes du bot :
+ * - Recrutement : bouton "recruitment:start-form" -> modal -> "recruitment:submit-form"
+ * - Commande self-service : select "order:select-item" -> modal dynamique ->
+ *   "order:submit-item:<catalogItemId>" -> boutons "order:add-more" / "order:confirm"
+ */
+
+/** Questions fixes du formulaire de candidature (limite Discord : 5 champs max par modal). */
 const RECRUITMENT_QUESTIONS = ["Nom RP", "Age", "Experience RP", "Disponibilites", "Motivation"];
 
+/** Route une commande slash vers son `Command.execute`, avec gestion d'erreur generique commune a toutes les commandes. */
 async function handleChatInputCommand(interaction: Interaction): Promise<void> {
   if (!interaction.isChatInputCommand()) return;
 
@@ -38,6 +50,11 @@ async function handleChatInputCommand(interaction: Interaction): Promise<void> {
   }
 }
 
+/**
+ * Clic sur le bouton "Remplir le formulaire" d'un ticket de recrutement : ouvre un modal
+ * avec les 5 questions fixes. Les 2 premieres questions courtes (nom, age) utilisent un
+ * champ court, les 3 suivantes (experience, disponibilites, motivation) un champ long.
+ */
 async function handleRecruitmentStartForm(interaction: Interaction): Promise<void> {
   if (!interaction.isButton()) return;
 
@@ -55,6 +72,12 @@ async function handleRecruitmentStartForm(interaction: Interaction): Promise<voi
   await interaction.showModal(modal);
 }
 
+/**
+ * Soumission du formulaire de candidature : enregistre les reponses, poste un embed recap
+ * visible dans le salon (pour le staff), et confirme au candidat en ephemere. Refuse si le
+ * salon n'est plus/pas rattache a un ticket de recrutement (ex: commande rejouee sur un
+ * mauvais salon, ticket deja ferme).
+ */
 async function handleRecruitmentSubmitForm(interaction: Interaction): Promise<void> {
   if (!interaction.isModalSubmit() || !interaction.channelId) return;
 
@@ -82,6 +105,12 @@ async function handleRecruitmentSubmitForm(interaction: Interaction): Promise<vo
   await interaction.reply({ content: "Formulaire envoye, merci !", ephemeral: true });
 }
 
+/**
+ * Selection d'un article dans le menu deroulant du catalogue : construit et affiche un
+ * modal dynamique a partir des champs personnalises configures pour cet article par le
+ * staff (`CatalogItemField`). Si l'article n'a aucun champ personnalise, affiche un unique
+ * champ de confirmation optionnel plutot qu'un modal vide (Discord exige au moins un composant).
+ */
 async function handleOrderSelectItem(interaction: Interaction): Promise<void> {
   if (!interaction.isStringSelectMenu()) return;
 
@@ -109,6 +138,8 @@ async function handleOrderSelectItem(interaction: Interaction): Promise<void> {
         .setLabel(field.label.slice(0, 45))
         .setStyle(field.style === "PARAGRAPH" ? TextInputStyle.Paragraph : TextInputStyle.Short)
         .setRequired(field.required);
+      // Pas de type de champ "nombre" natif dans les modals Discord : on guide via placeholder,
+      // la valeur est parsee et validee cote serveur (voir orderService.addItemFromAnswers).
       if (field.style === "QUANTITY") input.setPlaceholder("Nombre (ex: 1)");
       modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
     }
@@ -117,6 +148,15 @@ async function handleOrderSelectItem(interaction: Interaction): Promise<void> {
   await interaction.showModal(modal);
 }
 
+/**
+ * Soumission du modal d'un article : ajoute la ligne a la commande en cours (creee si besoin),
+ * puis repost un embed recapitulatif complet de la commande (tous les articles ajoutes jusque-la,
+ * pas seulement celui-ci) avec les boutons pour continuer ("Ajouter un article") ou terminer
+ * ("Valider la commande"). Chaque soumission poste un nouveau message plutot que d'editer le
+ * precedent, pour rester simple et robuste sans avoir a suivre un id de message entre interactions.
+ *
+ * @param catalogItemId - extrait du customId du modal par l'appelant (`onInteractionCreate`)
+ */
 async function handleOrderSubmitItem(interaction: Interaction, catalogItemId: string): Promise<void> {
   if (!interaction.isModalSubmit() || !interaction.channelId) return;
 
@@ -162,6 +202,11 @@ async function handleOrderSubmitItem(interaction: Interaction, catalogItemId: st
   await interaction.reply({ content: "Article ajoute a la commande.", ephemeral: true });
 }
 
+/**
+ * Clic sur "Ajouter un article" : re-affiche le menu deroulant du catalogue, en reponse
+ * ephemere (visible seulement par le client) pour ne pas encombrer le salon d'un nouveau
+ * menu a chaque fois.
+ */
 async function handleOrderAddMore(interaction: Interaction): Promise<void> {
   if (!interaction.isButton()) return;
 
@@ -175,6 +220,7 @@ async function handleOrderAddMore(interaction: Interaction): Promise<void> {
     .setCustomId("order:select-item")
     .setPlaceholder("Choisir un article")
     .addOptions(
+      // Un StringSelectMenu Discord accepte au plus 25 options.
       items.slice(0, 25).map((item) => ({
         label: item.name.slice(0, 100),
         description: `${item.price.toLocaleString("fr-FR")} $`,
@@ -186,6 +232,12 @@ async function handleOrderAddMore(interaction: Interaction): Promise<void> {
   await interaction.reply({ components: [row], ephemeral: true });
 }
 
+/**
+ * Clic sur "Valider la commande" : etape finale du flux self-service cote client. Ne fait
+ * plus aucune saisie du staff — se contente de poster le recap final et de ping les roles
+ * staff configures, a charge pour eux de confirmer le paiement (`/order paid`) qui genere
+ * la facture. Refuse si la commande est vide (rien a valider).
+ */
 async function handleOrderConfirm(interaction: Interaction): Promise<void> {
   if (!interaction.isButton()) return;
 
@@ -220,6 +272,12 @@ async function handleOrderConfirm(interaction: Interaction): Promise<void> {
   await interaction.reply({ content: "Commande validee, le staff a ete notifie.", ephemeral: true });
 }
 
+/**
+ * Handler de l'evenement `interactionCreate`. Aiguille par type d'interaction puis par
+ * `customId` vers le handler correspondant ci-dessus. Toute exception non geree par un
+ * handler est capturee ici (log + reponse d'erreur generique) pour eviter qu'une interaction
+ * Discord ne reste "en attente" indefiniment cote client si le bot plante en cours de traitement.
+ */
 export async function onInteractionCreate(interaction: Interaction): Promise<void> {
   try {
     if (interaction.isChatInputCommand()) {
@@ -242,6 +300,8 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
     if (interaction.isModalSubmit()) {
       if (interaction.customId === "recruitment:submit-form") return handleRecruitmentSubmitForm(interaction);
       if (interaction.customId.startsWith("order:submit-item:")) {
+        // Le catalogItemId est encode dans le customId du modal (voir handleOrderSelectItem)
+        // car Discord ne permet pas de passer d'etat arbitraire entre l'ouverture et la soumission.
         const catalogItemId = interaction.customId.slice("order:submit-item:".length);
         return handleOrderSubmitItem(interaction, catalogItemId);
       }

@@ -2,12 +2,23 @@ import { EmbedBuilder, PermissionFlagsBits, SlashCommandBuilder } from "discord.
 import type { Command } from "./types.js";
 import { addField, addItem, getItem, listActive, removeField, removeItem } from "../services/catalogService.js";
 
+/**
+ * Styles de champ proposes au staff pour `field-add`. "Quantite" est un choix special :
+ * sa reponse alimente automatiquement `OrderItem.quantity` (voir `orderService.addItemFromAnswers`)
+ * au lieu d'etre juste affichee comme texte libre sur la facture.
+ */
 const FIELD_STYLE_CHOICES = [
   { name: "Texte court", value: "SHORT" },
   { name: "Texte long", value: "PARAGRAPH" },
   { name: "Quantite", value: "QUANTITY" },
 ] as const;
 
+/**
+ * `/catalog` : commande d'administration (reservee `ManageGuild`) pour que le staff
+ * configure le catalogue de produits/services et les champs que le client devra remplir
+ * en commandant chaque article. C'est cette configuration qui pilote le formulaire dynamique
+ * genere cote client (voir `handleOrderSelectItem` dans interactionCreate.ts).
+ */
 export const catalogCommand: Command = {
   data: new SlashCommandBuilder()
     .setName("catalog")
@@ -116,6 +127,8 @@ export const catalogCommand: Command = {
       const required = interaction.options.getBoolean("required") ?? true;
 
       try {
+        // addField valide les regles metier (max 5 champs, au plus un QUANTITY) et leve une
+        // Error au message deja redige pour l'utilisateur : on le relaie tel quel.
         await addField(interaction.guildId, itemId, { label, style, required });
         await interaction.reply({ content: `Champ ajoute : **${label}**`, ephemeral: true });
       } catch (error) {

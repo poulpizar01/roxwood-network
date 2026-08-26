@@ -4,6 +4,15 @@ import { getTicketByChannel, recordActivity, recordFirstStaffReply } from "../se
 import { findAutoReply } from "../services/autoReplyService.js";
 import { logger } from "../utils/logger.js";
 
+/**
+ * Handler de l'evenement `messageCreate`, restreint aux canaux qui sont des tickets suivis
+ * et encore ouverts. Trois responsabilites :
+ * 1. mettre a jour l'activite du ticket (base du calcul d'escalade) ;
+ * 2. detecter la premiere reponse d'un membre du staff ;
+ * 3. si l'auteur est le client ayant ouvert le ticket, tenter une reponse automatique.
+ * Ignore les messages de bots (evite les boucles avec le bot lui-meme ou d'autres bots
+ * comme Ticket Tool) et les messages hors guilde (DMs).
+ */
 export async function onMessageCreate(message: Message): Promise<void> {
   if (message.author.bot || !message.inGuild()) return;
 
@@ -21,6 +30,8 @@ export async function onMessageCreate(message: Message): Promise<void> {
     return;
   }
 
+  // Seul l'auteur du ticket declenche les reponses automatiques (pas n'importe quel
+  // visiteur du salon) ; si l'opener n'a pas pu etre determine, on laisse passer par prudence.
   if (ticket.openerId && message.author.id !== ticket.openerId) return;
 
   try {

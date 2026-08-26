@@ -2,6 +2,12 @@ import { PermissionFlagsBits, SlashCommandBuilder, ChannelType } from "discord.j
 import type { Command } from "./types.js";
 import { setTicketCategory, addStaffRole, setEscalationMinutes } from "../services/guildConfigService.js";
 
+/**
+ * `/config` : commande d'administration (reservee `ManageGuild`) pour parametrer le bot sur
+ * ce serveur — associer des categories a un type de ticket, definir le staff, regler l'escalade.
+ * Toutes les sous-commandes ecrivent dans le `GuildConfig` de la guilde courante uniquement
+ * (voir `guildConfigService.ts`).
+ */
 export const configCommand: Command = {
   data: new SlashCommandBuilder()
     .setName("config")
@@ -49,6 +55,9 @@ export const configCommand: Command = {
     if (!interaction.inGuild()) return;
     const sub = interaction.options.getSubcommand();
 
+    // Associe/reassocie une categorie a un type de ticket : c'est ce mapping que
+    // `getCategoryType` consulte a chaque `channelCreate` pour decider si un canal
+    // doit etre suivi comme ticket, et sous quel flux (recrutement ou service).
     if (sub === "add-category") {
       const category = interaction.options.getChannel("category", true);
       const type = interaction.options.getString("type", true) as "RECRUITMENT" | "SERVICE";
@@ -65,6 +74,8 @@ export const configCommand: Command = {
       return;
     }
 
+    // 0 minute = desactive l'escalade (stocke comme `null` en base) plutot que de la
+    // regler a un delai de zero seconde, ce qui n'aurait pas de sens metier.
     if (sub === "set-escalation-timeout") {
       const minutes = interaction.options.getInteger("minutes", true);
       await setEscalationMinutes(interaction.guildId, minutes === 0 ? null : minutes);
