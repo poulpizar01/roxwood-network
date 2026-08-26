@@ -4,10 +4,19 @@ Bot Discord (Node.js + TypeScript + discord.js + Prisma/PostgreSQL) qui observe 
 
 Ticket Tool n'a pas d'API publique : la detection se fait en ecoutant les evenements Discord (creation/suppression/renommage de canal dans la categorie configuree).
 
+## Secrets : qui a acces a quoi
+
+Le token du bot de **production** (celui utilise sur le vrai serveur Discord) vit uniquement dans le `.env` du VPS, configure par la personne qui a acces au VPS. Il n'est jamais commite, jamais partage sur GitHub, et les contributeurs qui n'ont acces qu'au repo n'y ont pas acces.
+
+Pour developper/tester en local sans ce token, creer une application Discord **personnelle et separee** sur https://discord.com/developers/applications (gratuit) :
+1. New Application → Bot → copier le token → c'est ton `DISCORD_TOKEN` de dev local.
+2. Recuperer le Client ID dans "General Information" → `CLIENT_ID`.
+3. Inviter ce bot de test sur un serveur Discord perso (le tien, ou un serveur de test) via l'URL d'invitation OAuth2 generee dans le portail, avec un vrai Ticket Tool installe dessus pour tester la detection.
+
 ## Demarrage (dev local)
 
 1. `npm install`
-2. Copier `.env.example` en `.env` et renseigner `DISCORD_TOKEN`, `CLIENT_ID`, `DATABASE_URL` (et `DEV_GUILD_ID` en dev pour un enregistrement instantane des commandes slash).
+2. Copier `.env.example` en `.env` et renseigner `DISCORD_TOKEN`/`CLIENT_ID` (ton bot de test personnel, voir ci-dessus), `DATABASE_URL` (et `DEV_GUILD_ID` en dev pour un enregistrement instantane des commandes slash).
 3. `npx prisma migrate dev` pour creer le schema PostgreSQL.
 4. `npm run dev` pour lancer le bot.
 
