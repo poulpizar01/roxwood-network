@@ -1,8 +1,13 @@
 # Roxwood Network
 
-Bot Discord (Node.js + TypeScript + discord.js + Prisma/PostgreSQL) qui ajoute une sur-couche a Ticket Tool : il observe les tickets crees par Ticket Tool et ajoute priorites/tags, escalade automatique, reponses automatiques par mot-cle, et des webhooks sortants pour brancher des systemes externes.
+Bot Discord (Node.js + TypeScript + discord.js + Prisma/PostgreSQL) qui ajoute une sur-couche a Ticket Tool pour des serveurs GTA RP, sur deux usages :
 
-Ticket Tool n'a pas d'API publique : la detection se fait en ecoutant les evenements Discord (creation/suppression/renommage de canal dans la categorie configuree).
+- **Recrutement** : formulaire de candidature (bouton -> modal) rempli par le candidat des l'ouverture du ticket, pipeline de suivi pour le staff (etape, recruteur assigne).
+- **Service client** : catalogue de produits/services (photo + champs personnalises par article, configure par le staff), commande composee **par le client lui-meme** (menu deroulant + formulaire), le staff n'a qu'a confirmer le paiement — ce qui genere automatiquement une facture en image.
+
+Plus les fonctions generiques de la base : priorites/tags, escalade automatique, reponses automatiques par mot-cle, webhooks sortants pour brancher des systemes externes.
+
+Ticket Tool n'a pas d'API publique : la detection se fait en ecoutant les evenements Discord (creation/suppression/renommage de canal dans la categorie configuree, associee a un type Recrutement ou Service via `/config add-category`).
 
 ## Secrets : qui a acces a quoi
 
@@ -36,13 +41,32 @@ Aucun port n'est expose publiquement (le bot ne fait que des connexions sortante
 
 ## Configuration sur un serveur
 
-- `/config set-ticket-category` : indique quelle categorie Discord Ticket Tool utilise pour ouvrir les tickets.
-- `/config set-staff-role` : role(s) considere(s) comme staff (pour le temps de premiere reponse et les pings d'escalade).
+- `/config add-category <category> <type>` : associe une categorie Discord (celle utilisee par un bouton du panel Ticket Tool) a un type de ticket, Recrutement ou Service. Une categorie non configuree est ignoree par le bot (geree par Ticket Tool seul).
+- `/config set-staff-role` : role(s) considere(s) comme staff (pour le temps de premiere reponse, les pings d'escalade et les notifications de nouvelle commande).
 - `/config set-escalation-timeout` : delai en minutes avant qu'un ticket sans reponse staff declenche une escalade (0 = desactive).
 
-## Commandes disponibles
+## Recrutement
 
-- `/ticket info` — resume du ticket courant (statut, priorite, tags, opener).
+A l'ouverture d'un ticket dans une categorie de type Recrutement, le bot poste un bouton "Remplir le formulaire" qui ouvre un modal Discord (5 questions fixes : Nom RP, Age, Experience RP, Disponibilites, Motivation). Les reponses sont enregistrees et un recap est poste dans le salon.
+
+- `/recruitment status <etape>` — En attente / Entretien / Accepte / Refuse.
+- `/recruitment claim` — s'assigner la candidature.
+- `/ticket info` affiche aussi le statut de la candidature et le recruteur assigne.
+
+## Service client (catalogue + commande self-service)
+
+Le staff configure le catalogue, le **client compose sa commande lui-meme** dans le ticket :
+
+1. `/catalog add <name> <price> <image> [description]` — cree un article (photo obligatoire).
+2. `/catalog field-add <item> <label> <style> [required]` — jusqu'a 5 champs par article, a remplir par le client lors de la commande (ex: date + nombre d'invites pour une salle, quantite + boisson pour un menu). Le style `Quantite` alimente automatiquement le calcul du prix ; les autres styles (`Texte court`/`Texte long`) sont juste enregistres et affiches sur la facture.
+3. A l'ouverture d'un ticket Service, le bot poste un menu deroulant du catalogue actif. Le client choisit un article -> un formulaire genere a partir des champs configures s'ouvre -> il peut ajouter d'autres articles -> "Valider la commande" ping le role staff.
+4. Cote staff : `/order status`, `/order paid` (marque payee et **genere/poste automatiquement l'image de facture**), `/order invoice` (renvoie l'image), `/order add-item`/`remove-item` pour des corrections manuelles exceptionnelles.
+
+Autres commandes catalogue : `/catalog list`, `/catalog view <id>`, `/catalog remove <id>`, `/catalog field-remove <field-id>`.
+
+## Commandes generiques
+
+- `/ticket info` — resume du ticket courant (statut, priorite, tags, opener, + bloc specifique Recrutement ou Service).
 - `/ticket priority <level>` — LOW / NORMAL / HIGH / URGENT.
 - `/ticket tag add|remove <tag>`.
 - `/autoreply add|remove|list` — regles de reponse automatique mot-cle.
