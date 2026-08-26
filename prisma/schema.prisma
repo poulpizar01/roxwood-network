@@ -1,0 +1,92 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model GuildConfig {
+  id                String   @id @default(cuid())
+  guildId           String   @unique
+  ticketCategoryIds String[]
+  closedCategoryId  String?
+  staffRoleIds      String[]
+  escalationMinutes Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  tickets        Ticket[]
+  autoReplyRules AutoReplyRule[]
+  webhooks       WebhookSubscription[]
+}
+
+model Ticket {
+  id                String         @id @default(cuid())
+  guildId           String
+  channelId         String         @unique
+  categoryId        String
+  openerId          String?
+  status            TicketStatus   @default(OPEN)
+  priority          TicketPriority @default(NORMAL)
+  createdAt         DateTime       @default(now())
+  closedAt          DateTime?
+  firstStaffReplyAt DateTime?
+  lastActivityAt    DateTime       @default(now())
+  escalatedAt       DateTime?
+
+  guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
+  tags        TicketTag[]
+
+  @@index([guildId, status])
+}
+
+model TicketTag {
+  id       String @id @default(cuid())
+  ticketId String
+  tag      String
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, tag])
+}
+
+model AutoReplyRule {
+  id        String   @id @default(cuid())
+  guildId   String
+  trigger   String
+  response  String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
+
+  @@index([guildId, enabled])
+}
+
+model WebhookSubscription {
+  id        String   @id @default(cuid())
+  guildId   String
+  eventType String
+  url       String
+  secret    String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
+
+  @@index([guildId, eventType, enabled])
+}
+
+enum TicketStatus {
+  OPEN
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
