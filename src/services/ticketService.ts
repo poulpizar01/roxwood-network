@@ -1,4 +1,5 @@
 import type { NonThreadGuildBasedChannel, PermissionOverwrites } from "discord.js";
+import type { Ticket, TicketType } from "@prisma/client";
 import { prisma } from "../db/prisma.js";
 import { logger } from "../utils/logger.js";
 import { dispatchWebhook } from "./webhookDispatcher.js";
@@ -10,26 +11,34 @@ function guessOpenerId(channel: NonThreadGuildBasedChannel): string | null {
   return memberOverwrite?.id ?? null;
 }
 
-export async function trackTicketChannel(channel: NonThreadGuildBasedChannel, categoryId: string): Promise<void> {
+export async function trackTicketChannel(
+  channel: NonThreadGuildBasedChannel,
+  categoryId: string,
+  type: TicketType
+): Promise<Ticket | null> {
   const existing = await prisma.ticket.findUnique({ where: { channelId: channel.id } });
-  if (existing) return;
+  if (existing) return null;
 
   const ticket = await prisma.ticket.create({
     data: {
       guildId: channel.guildId,
       channelId: channel.id,
       categoryId,
+      type,
       openerId: guessOpenerId(channel),
     },
   });
 
-  logger.info(`Nouveau ticket suivi : ${channel.id} (guild ${channel.guildId})`);
+  logger.info(`Nouveau ticket suivi (${type}) : ${channel.id} (guild ${channel.guildId})`);
 
   await dispatchWebhook(channel.guildId, "ticket.created", {
     ticketId: ticket.id,
     channelId: ticket.channelId,
     openerId: ticket.openerId,
+    type: ticket.type,
   });
+
+  return ticket;
 }
 
 export async function markTicketClosed(channelId: string, guildId: string): Promise<void> {

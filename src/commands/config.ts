@@ -1,6 +1,6 @@
 import { PermissionFlagsBits, SlashCommandBuilder, ChannelType } from "discord.js";
 import type { Command } from "./types.js";
-import { addTicketCategory, addStaffRole, setEscalationMinutes } from "../services/guildConfigService.js";
+import { setTicketCategory, addStaffRole, setEscalationMinutes } from "../services/guildConfigService.js";
 
 export const configCommand: Command = {
   data: new SlashCommandBuilder()
@@ -9,14 +9,21 @@ export const configCommand: Command = {
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand((sub) =>
       sub
-        .setName("set-ticket-category")
-        .setDescription("Ajouter une categorie surveillee comme categorie de tickets")
+        .setName("add-category")
+        .setDescription("Associer une categorie Discord a un type de ticket (Recrutement ou Service)")
         .addChannelOption((opt) =>
           opt
             .setName("category")
             .setDescription("Categorie Discord utilisee par Ticket Tool")
             .addChannelTypes(ChannelType.GuildCategory)
             .setRequired(true)
+        )
+        .addStringOption((opt) =>
+          opt
+            .setName("type")
+            .setDescription("Type de ticket pour cette categorie")
+            .setRequired(true)
+            .addChoices({ name: "Recrutement", value: "RECRUITMENT" }, { name: "Service", value: "SERVICE" })
         )
     )
     .addSubcommand((sub) =>
@@ -42,10 +49,12 @@ export const configCommand: Command = {
     if (!interaction.inGuild()) return;
     const sub = interaction.options.getSubcommand();
 
-    if (sub === "set-ticket-category") {
+    if (sub === "add-category") {
       const category = interaction.options.getChannel("category", true);
-      await addTicketCategory(interaction.guildId, category.id);
-      await interaction.reply({ content: `Categorie de tickets ajoutee : <#${category.id}>`, ephemeral: true });
+      const type = interaction.options.getString("type", true) as "RECRUITMENT" | "SERVICE";
+      await setTicketCategory(interaction.guildId, category.id, type);
+      const typeLabel = type === "RECRUITMENT" ? "Recrutement" : "Service";
+      await interaction.reply({ content: `Categorie <#${category.id}> associee au type **${typeLabel}**.`, ephemeral: true });
       return;
     }
 

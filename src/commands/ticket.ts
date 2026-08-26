@@ -2,6 +2,8 @@ import { SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import type { Command } from "./types.js";
 import { prisma } from "../db/prisma.js";
 import { getTicketByChannel } from "../services/ticketService.js";
+import { getApplication } from "../services/recruitmentService.js";
+import { computeTotal, getOrderByTicket } from "../services/orderService.js";
 
 const PRIORITY_CHOICES = ["LOW", "NORMAL", "HIGH", "URGENT"] as const;
 
@@ -9,9 +11,10 @@ async function buildTicketSummary(channelId: string) {
   const ticket = await getTicketByChannel(channelId);
   if (!ticket) return null;
 
-  return new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setTitle("Ticket")
     .addFields(
+      { name: "Type", value: ticket.type, inline: true },
       { name: "Statut", value: ticket.status, inline: true },
       { name: "Priorite", value: ticket.priority, inline: true },
       { name: "Ouvert par", value: ticket.openerId ? `<@${ticket.openerId}>` : "inconnu", inline: true },
@@ -22,6 +25,26 @@ async function buildTicketSummary(channelId: string) {
       }
     )
     .setColor(0x5865f2);
+
+  if (ticket.type === "RECRUITMENT") {
+    const application = await getApplication(ticket.id);
+    if (application) {
+      embed.addFields({
+        name: "Candidature",
+        value: `Statut : **${application.status}**\nRecruteur : ${application.recruiterId ? `<@${application.recruiterId}>` : "non assigne"}`,
+      });
+    }
+  } else if (ticket.type === "SERVICE") {
+    const order = await getOrderByTicket(ticket.id);
+    if (order) {
+      embed.addFields({
+        name: "Commande",
+        value: `Statut : **${order.status}**\nPaiement : **${order.paymentStatus}**\nTotal : ${computeTotal(order).toLocaleString("fr-FR")} $`,
+      });
+    }
+  }
+
+  return embed;
 }
 
 export const ticketCommand: Command = {

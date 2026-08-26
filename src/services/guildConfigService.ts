@@ -1,69 +1,83 @@
-import type { GuildConfig } from "@prisma/client";
+import type { GuildConfig, TicketCategoryConfig, TicketType } from "@prisma/client";
 import { prisma } from "../db/prisma.js";
 
-const cache = new Map<string, GuildConfig>();
+type GuildConfigWithCategories = GuildConfig & { ticketCategories: TicketCategoryConfig[] };
 
-export async function getGuildConfig(guildId: string): Promise<GuildConfig | null> {
+const cache = new Map<string, GuildConfigWithCategories>();
+
+export async function getGuildConfig(guildId: string): Promise<GuildConfigWithCategories | null> {
   const cached = cache.get(guildId);
   if (cached) return cached;
 
-  const config = await prisma.guildConfig.findUnique({ where: { guildId } });
+  const config = await prisma.guildConfig.findUnique({
+    where: { guildId },
+    include: { ticketCategories: true },
+  });
   if (config) cache.set(guildId, config);
   return config;
 }
 
-async function ensureGuildConfig(guildId: string): Promise<GuildConfig> {
+async function ensureGuildConfig(guildId: string): Promise<GuildConfigWithCategories> {
   const existing = await getGuildConfig(guildId);
   if (existing) return existing;
 
   const created = await prisma.guildConfig.create({
-    data: { guildId, ticketCategoryIds: [], staffRoleIds: [] },
+    data: { guildId, staffRoleIds: [] },
+    include: { ticketCategories: true },
   });
   cache.set(guildId, created);
   return created;
 }
 
-function invalidate(guildId: string, updated: GuildConfig) {
-  cache.set(guildId, updated);
-}
-
-export async function addTicketCategory(guildId: string, categoryId: string): Promise<GuildConfig> {
-  const config = await ensureGuildConfig(guildId);
-  if (config.ticketCategoryIds.includes(categoryId)) return config;
-
-  const updated = await prisma.guildConfig.update({
+async function refresh(guildId: string): Promise<GuildConfigWithCategories> {
+  const config = await prisma.guildConfig.findUniqueOrThrow({
     where: { guildId },
-    data: { ticketCategoryIds: { push: categoryId } },
+    include: { ticketCategories: true },
   });
-  invalidate(guildId, updated);
-  return updated;
+  cache.set(guildId, config);
+  return config;
 }
 
-export async function addStaffRole(guildId: string, roleId: string): Promise<GuildConfig> {
+export async function setTicketCategory(
+  guildId: string,
+  categoryId: string,
+  type: TicketType
+): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.ticketCategoryConfig.upsert({
+    where: { guildId_categoryId: { guildId, categoryId } },
+    create: { guildId, categoryId, type },
+    update: { type },
+  });
+  return refresh(guildId);
+}
+
+export async function addStaffRole(guildId: string, roleId: string): Promise<GuildConfigWithCategories> {
   const config = await ensureGuildConfig(guildId);
   if (config.staffRoleIds.includes(roleId)) return config;
 
-  const updated = await prisma.guildConfig.update({
+  await prisma.guildConfig.update({
     where: { guildId },
     data: { staffRoleIds: { push: roleId } },
   });
-  invalidate(guildId, updated);
-  return updated;
+  return refresh(guildId);
 }
 
-export async function setEscalationMinutes(guildId: string, minutes: number | null): Promise<GuildConfig> {
+export async function setEscalationMinutes(guildId: string, minutes: number | null): Promise<GuildConfigWithCategories> {
   await ensureGuildConfig(guildId);
-  const updated = await prisma.guildConfig.update({
+  await prisma.guildConfig.update({
     where: { guildId },
     data: { escalationMinutes: minutes },
   });
-  invalidate(guildId, updated);
-  return updated;
+  return refresh(guildId);
 }
 
-export function isTicketCategory(config: GuildConfig | null, categoryId: string | null): boolean {
-  if (!config || !categoryId) return false;
-  return config.ticketCategoryIds.includes(categoryId);
+export function getCategoryType(
+  config: GuildConfigWithCategories | null,
+  categoryId: string | null
+): TicketType | null {
+  if (!config || !categoryId) return null;
+  return config.ticketCategories.find((c) => c.categoryId === categoryId)?.type ?? null;
 }
 
 export function isStaffMember(config: GuildConfig | null, memberRoleIds: string[]): boolean {

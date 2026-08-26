@@ -10,16 +10,32 @@ datasource db {
 model GuildConfig {
   id                String   @id @default(cuid())
   guildId           String   @unique
-  ticketCategoryIds String[]
-  closedCategoryId  String?
   staffRoleIds      String[]
   escalationMinutes Int?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  tickets        Ticket[]
-  autoReplyRules AutoReplyRule[]
-  webhooks       WebhookSubscription[]
+  tickets         Ticket[]
+  autoReplyRules  AutoReplyRule[]
+  webhooks        WebhookSubscription[]
+  ticketCategories TicketCategoryConfig[]
+  catalogItems    CatalogItem[]
+}
+
+model TicketCategoryConfig {
+  id         String     @id @default(cuid())
+  guildId    String
+  categoryId String
+  type       TicketType
+
+  guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
+
+  @@unique([guildId, categoryId])
+}
+
+enum TicketType {
+  RECRUITMENT
+  SERVICE
 }
 
 model Ticket {
@@ -27,6 +43,7 @@ model Ticket {
   guildId           String
   channelId         String         @unique
   categoryId        String
+  type              TicketType
   openerId          String?
   status            TicketStatus   @default(OPEN)
   priority          TicketPriority @default(NORMAL)
@@ -38,8 +55,11 @@ model Ticket {
 
   guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
   tags        TicketTag[]
+  application RecruitmentApplication?
+  order       ServiceOrder?
 
   @@index([guildId, status])
+  @@index([guildId, type])
 }
 
 model TicketTag {
@@ -89,4 +109,119 @@ enum TicketPriority {
   NORMAL
   HIGH
   URGENT
+}
+
+model RecruitmentApplication {
+  id          String            @id @default(cuid())
+  ticketId    String            @unique
+  status      ApplicationStatus @default(PENDING)
+  recruiterId String?
+  submittedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  ticket  Ticket               @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  answers RecruitmentAnswer[]
+}
+
+model RecruitmentAnswer {
+  id            String @id @default(cuid())
+  applicationId String
+  question      String
+  answer        String
+
+  application RecruitmentApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+enum ApplicationStatus {
+  PENDING
+  INTERVIEW
+  ACCEPTED
+  REJECTED
+}
+
+model CatalogItem {
+  id          String   @id @default(cuid())
+  guildId     String
+  name        String
+  description String?
+  price       Int
+  imageUrl    String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  guildConfig GuildConfig        @relation(fields: [guildId], references: [guildId])
+  fields      CatalogItemField[]
+  orderItems  OrderItem[]
+
+  @@index([guildId, active])
+}
+
+// Champs definis par le staff pour un article donne : ce que le client doit remplir
+// en le commandant. Max 5 par article (limite Discord : un modal a au plus 5 champs).
+model CatalogItemField {
+  id            String            @id @default(cuid())
+  catalogItemId String
+  label         String
+  style         CatalogFieldStyle
+  required      Boolean           @default(true)
+  position      Int               @default(0)
+
+  catalogItem CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+}
+
+// QUANTITY est un style special : sa reponse alimente OrderItem.quantity (utilise dans le calcul du prix)
+// au lieu d'etre juste stockee comme reponse libre. Au plus un champ QUANTITY par article (verifie en code).
+enum CatalogFieldStyle {
+  SHORT
+  PARAGRAPH
+  QUANTITY
+}
+
+model ServiceOrder {
+  id            String        @id @default(cuid())
+  ticketId      String        @unique
+  status        OrderStatus   @default(PENDING)
+  paymentStatus PaymentStatus @default(UNPAID)
+  invoiceNumber String?       @unique
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  ticket Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  items  OrderItem[]
+}
+
+model OrderItem {
+  id            String  @id @default(cuid())
+  orderId       String
+  catalogItemId String?
+  name          String
+  unitPrice     Int
+  quantity      Int     @default(1)
+
+  order       ServiceOrder      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  catalogItem CatalogItem?      @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
+  answers     OrderItemAnswer[]
+}
+
+// Reponses du client aux champs configures (hors QUANTITY, qui va dans OrderItem.quantity).
+model OrderItemAnswer {
+  id          String @id @default(cuid())
+  orderItemId String
+  question    String
+  answer      String
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+}
+
+enum OrderStatus {
+  PENDING
+  PREPARING
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
 }
