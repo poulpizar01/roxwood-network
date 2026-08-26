@@ -113,6 +113,19 @@ export async function setEscalationMinutes(guildId: string, minutes: number | nu
 }
 
 /**
+ * Definit le salon dedie au suivi des candidatures (recap + boutons Statut/S'assigner).
+ * `null` revient au comportement par defaut (recap poste dans le salon du ticket).
+ */
+export async function setRecruitmentLogChannel(guildId: string, channelId: string | null): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.guildConfig.update({
+    where: { guildId },
+    data: { recruitmentLogChannelId: channelId },
+  });
+  return refresh(guildId);
+}
+
+/**
  * Determine le type de ticket associe a une categorie Discord donnee, a partir d'une config
  * deja chargee. Retourne `null` si la categorie n'est pas suivie (pas de config, pas d'id,
  * ou categorie non mappee) — dans ce cas le bot doit ignorer completement le canal.

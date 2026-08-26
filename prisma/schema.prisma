@@ -17,6 +17,10 @@ model GuildConfig {
   staffRoleIds      String[]
   /// Delai (minutes) sans reponse staff avant escalade d'un ticket. `null` = escalade desactivee.
   escalationMinutes Int?
+  /// Salon dedie ou sont postes les recaps de candidature (avec boutons Statut/S'assigner),
+  /// pour que le suivi reste visible par le staff sans polluer le salon du ticket (partage
+  /// avec le candidat). `null` = pas configure, le recap est poste dans le salon du ticket.
+  recruitmentLogChannelId String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -148,10 +152,17 @@ model RecruitmentApplication {
   id          String            @id @default(cuid())
   ticketId    String            @unique
   status      ApplicationStatus @default(PENDING)
-  /// Membre du staff s'etant assigne la candidature (`/recruitment claim`). `null` = non assignee.
+  /// Membre du staff s'etant assigne la candidature (bouton "S'assigner"). `null` = non assignee.
   recruiterId String?
   /// Renseigne quand le candidat soumet le formulaire (peut rester `null` s'il n'a pas encore repondu).
   submittedAt DateTime?
+  /// Salon ou vit le message de suivi (recap + boutons Statut/S'assigner) : le salon
+  /// `recruitmentLogChannelId` de la guilde au moment de l'envoi, ou le salon du ticket en repli.
+  /// Conserve ici (plutot que relu depuis la config) pour retrouver le bon message meme si
+  /// la config change ensuite.
+  logChannelId String?
+  /// Id du message de suivi, pour pouvoir l'editer en place quand le statut ou le recruteur change.
+  logMessageId String?
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 

@@ -119,3 +119,15 @@ export async function getTicketByChannel(channelId: string) {
     include: { tags: true },
   });
 }
+
+/**
+ * Recupere un ticket par son id (pas son channelId). Utilise quand l'interaction ne se
+ * produit pas dans le salon du ticket lui-meme — ex: boutons Statut/S'assigner sur le
+ * message poste dans le salon dedie "suivi recrutement" — auquel cas l'id du ticket est
+ * encode dans le `customId` du composant plutot que deduit du salon courant.
+ */
+export async function getTicketById(ticketId: string) {
+  return prisma.ticket.findUnique({
+    where: { id: ticketId },
+  });
+}

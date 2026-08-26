@@ -1,10 +1,11 @@
 import { PermissionFlagsBits, SlashCommandBuilder, ChannelType } from "discord.js";
 import type { Command } from "./types.js";
-import { setTicketCategory, addStaffRole, setEscalationMinutes } from "../services/guildConfigService.js";
+import { setTicketCategory, addStaffRole, setEscalationMinutes, setRecruitmentLogChannel } from "../services/guildConfigService.js";
 
 /**
  * `/config` : commande d'administration (reservee `ManageGuild`) pour parametrer le bot sur
- * ce serveur — associer des categories a un type de ticket, definir le staff, regler l'escalade.
+ * ce serveur — associer des categories a un type de ticket, definir le staff, regler l'escalade,
+ * choisir le salon de suivi des candidatures.
  * Toutes les sous-commandes ecrivent dans le `GuildConfig` de la guilde courante uniquement
  * (voir `guildConfigService.ts`).
  */
@@ -49,6 +50,18 @@ export const configCommand: Command = {
             .setMinValue(0)
             .setRequired(true)
         )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("set-recruitment-channel")
+        .setDescription("Salon ou poster le suivi des candidatures (recap + boutons Statut/S'assigner)")
+        .addChannelOption((opt) =>
+          opt
+            .setName("channel")
+            .setDescription("Salon de suivi (laisser vide pour revenir au salon du ticket)")
+            .addChannelTypes(ChannelType.GuildText)
+            .setRequired(false)
+        )
     ) as SlashCommandBuilder,
 
   async execute(interaction) {
@@ -81,6 +94,18 @@ export const configCommand: Command = {
       await setEscalationMinutes(interaction.guildId, minutes === 0 ? null : minutes);
       await interaction.reply({
         content: minutes === 0 ? "Escalade desactivee." : `Escalade fixee a ${minutes} min sans reponse staff.`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (sub === "set-recruitment-channel") {
+      const channel = interaction.options.getChannel("channel");
+      await setRecruitmentLogChannel(interaction.guildId, channel?.id ?? null);
+      await interaction.reply({
+        content: channel
+          ? `Suivi des candidatures poste desormais dans <#${channel.id}>.`
+          : "Suivi des candidatures repostera dans le salon de chaque ticket.",
         ephemeral: true,
       });
     }

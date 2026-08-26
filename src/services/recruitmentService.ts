@@ -43,9 +43,17 @@ export async function setStatus(ticketId: string, status: ApplicationStatus) {
   return prisma.recruitmentApplication.update({ where: { ticketId }, data: { status } });
 }
 
-/** Assigne un membre du staff comme recruteur responsable de cette candidature. */
+/** Assigne un membre du staff comme recruteur responsable de cette candidature (reassignation possible). */
 export async function assignRecruiter(ticketId: string, recruiterId: string) {
   return prisma.recruitmentApplication.update({ where: { ticketId }, data: { recruiterId } });
+}
+
+/**
+ * Memorise ou vit le message de suivi (recap + boutons Statut/S'assigner), pour pouvoir
+ * le retrouver et l'editer en place lors d'un changement de statut ou d'assignation.
+ */
+export async function saveLogMessageRef(ticketId: string, logChannelId: string, logMessageId: string) {
+  return prisma.recruitmentApplication.update({ where: { ticketId }, data: { logChannelId, logMessageId } });
 }
 
 /** Recupere la candidature d'un ticket avec ses reponses, ou `null` si aucune n'existe. */

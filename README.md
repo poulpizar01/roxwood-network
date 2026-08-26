@@ -2,7 +2,7 @@
 
 Bot Discord (Node.js + TypeScript + discord.js + Prisma/PostgreSQL) qui ajoute une sur-couche a Ticket Tool pour des serveurs GTA RP, sur deux usages :
 
-- **Recrutement** : formulaire de candidature (bouton -> modal) rempli par le candidat des l'ouverture du ticket, pipeline de suivi pour le staff (etape, recruteur assigne).
+- **Recrutement** : formulaire de candidature (bouton -> modal) rempli par le candidat des l'ouverture du ticket, suivi pilote par le staff via des boutons (pas de commande a taper) dans un salon de suivi dedie.
 - **Service client** : catalogue de produits/services (photo + champs personnalises par article, configure par le staff), commande composee **par le client lui-meme** (menu deroulant + formulaire), le staff n'a qu'a confirmer le paiement — ce qui genere automatiquement une facture en image.
 
 Plus les fonctions generiques de la base : priorites/tags, escalade automatique, reponses automatiques par mot-cle, webhooks sortants pour brancher des systemes externes.
@@ -42,16 +42,18 @@ Aucun port n'est expose publiquement (le bot ne fait que des connexions sortante
 ## Configuration sur un serveur
 
 - `/config add-category <category> <type>` : associe une categorie Discord (celle utilisee par un bouton du panel Ticket Tool) a un type de ticket, Recrutement ou Service. Une categorie non configuree est ignoree par le bot (geree par Ticket Tool seul).
-- `/config set-staff-role` : role(s) considere(s) comme staff (pour le temps de premiere reponse, les pings d'escalade et les notifications de nouvelle commande).
+- `/config set-staff-role` : role(s) considere(s) comme staff (pour le temps de premiere reponse, les pings d'escalade, les notifications de nouvelle commande, et l'usage des boutons Statut/S'assigner).
 - `/config set-escalation-timeout` : delai en minutes avant qu'un ticket sans reponse staff declenche une escalade (0 = desactive).
+- `/config set-recruitment-channel [channel]` : salon dedie ou poster le suivi des candidatures (recap + boutons), pour ne pas encombrer le salon du ticket partage avec le candidat. Sans salon configure, le recap est poste dans le salon du ticket lui-meme.
 
 ## Recrutement
 
-A l'ouverture d'un ticket dans une categorie de type Recrutement, le bot poste un bouton "Remplir le formulaire" qui ouvre un modal Discord (5 questions fixes : Nom RP, Age, Experience RP, Disponibilites, Motivation). Les reponses sont enregistrees et un recap est poste dans le salon.
+A l'ouverture d'un ticket dans une categorie de type Recrutement, le bot poste un bouton "Remplir le formulaire" qui ouvre un modal Discord (5 questions fixes : Nom RP, Age, Experience RP, Disponibilites, Motivation). A la soumission, le candidat recoit une confirmation, et un recap (candidat, statut, recruteur, reponses) est poste dans le salon de suivi (`/config set-recruitment-channel`, ou le salon du ticket par defaut) avec deux boutons :
 
-- `/recruitment status <etape>` — En attente / Entretien / Accepte / Refuse.
-- `/recruitment claim` — s'assigner la candidature.
-- `/ticket info` affiche aussi le statut de la candidature et le recruteur assigne.
+- **Statut** — ouvre un menu deroulant ephemere (En attente / Entretien / Accepte / Refuse) ; le message de suivi se met a jour automatiquement.
+- **S'assigner** — assigne directement le membre du staff qui clique comme recruteur (reassignation possible).
+
+Ces boutons sont reserves au staff (`/config set-staff-role`) : un clic par quelqu'un d'autre est refuse. `/ticket info`, execute dans le salon du ticket, affiche aussi le statut de la candidature et le recruteur assigne.
 
 ## Service client (catalogue + commande self-service)
 
