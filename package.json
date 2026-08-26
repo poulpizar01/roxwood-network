@@ -1,7 +1,7 @@
 {
-  "name": "ticket-overlay-bot",
+  "name": "roxwood-network",
   "version": "0.1.0",
-  "description": "Sur-couche Discord pour Ticket Tool : workflow, escalade, reponses automatiques, webhooks sortants",
+  "description": "Roxwood Network : sur-couche Discord pour Ticket Tool (workflow, escalade, reponses automatiques, webhooks sortants)",
   "private": true,
   "type": "module",
   "main": "dist/index.js",

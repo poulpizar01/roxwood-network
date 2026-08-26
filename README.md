@@ -1,6 +1,6 @@
-# Sur-couche Ticket Tool
+# Roxwood Network
 
-Bot Discord (Node.js + TypeScript + discord.js + Prisma/PostgreSQL) qui observe les tickets crees par Ticket Tool et ajoute : priorites/tags, escalade automatique, reponses automatiques par mot-cle, et des webhooks sortants pour brancher des systemes externes.
+Bot Discord (Node.js + TypeScript + discord.js + Prisma/PostgreSQL) qui ajoute une sur-couche a Ticket Tool : il observe les tickets crees par Ticket Tool et ajoute priorites/tags, escalade automatique, reponses automatiques par mot-cle, et des webhooks sortants pour brancher des systemes externes.
 
 Ticket Tool n'a pas d'API publique : la detection se fait en ecoutant les evenements Discord (creation/suppression/renommage de canal dans la categorie configuree).
 
