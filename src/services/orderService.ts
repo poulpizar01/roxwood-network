@@ -3,9 +3,9 @@ import { prisma } from "../db/prisma.js";
 
 /**
  * Service de gestion de la commande (`ServiceOrder`, 1:1 avec un `Ticket` de type SERVICE)
- * et de ses lignes (`OrderItem`). Le flux principal est cote client (self-service : select
- * menu + modal, voir `interactionCreate.ts`) ; les commandes `/order` restent pour les
- * corrections manuelles du staff.
+ * et de ses lignes (`OrderItem`). Composition initiale cote client (self-service : select
+ * menu + modal), pilotage ensuite via les boutons du message "Commande validee" (statut,
+ * paiement, facture, corrections) — voir `orderLogService.ts` et `interactionCreate.ts`.
  */
 
 /**
@@ -75,9 +75,26 @@ export async function addItem(orderId: string, catalogItem: CatalogItem, quantit
   });
 }
 
-/** Retire une ligne de commande (`/order remove-item`, correction staff). */
+/** Retire une ligne de commande (correction staff, bouton "Retirer un article"). */
 export async function removeItem(orderItemId: string) {
   await prisma.orderItem.delete({ where: { id: orderItemId } });
+}
+
+/**
+ * Memorise l'id de l'unique message de commande dans le salon du ticket, pour pouvoir
+ * l'editer en place a chaque changement plutot que d'en reposter un nouveau.
+ */
+export async function saveConfirmationMessageId(orderId: string, messageId: string) {
+  return prisma.serviceOrder.update({ where: { id: orderId }, data: { confirmationMessageId: messageId } });
+}
+
+/**
+ * Marque la commande comme validee par le client (clic sur "Valider la commande") — bascule
+ * le message de commande de son style "composition" vers son style "suivi/facturation" pour
+ * tout ajout ulterieur d'article (voir `orderLogService.upsertOrderMessage`).
+ */
+export async function markConfirmed(orderId: string) {
+  return prisma.serviceOrder.update({ where: { id: orderId }, data: { confirmed: true } });
 }
 
 /** Change le statut logistique de la commande (PENDING / PREPARING / DELIVERED / CANCELLED). */

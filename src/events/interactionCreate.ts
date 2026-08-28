@@ -1,8 +1,5 @@
 import {
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
   ModalBuilder,
   StringSelectMenuBuilder,
   TextInputBuilder,
@@ -13,7 +10,7 @@ import {
 } from "discord.js";
 import { commandsByName } from "../commands/index.js";
 import { getTicketByChannel, getTicketById, markTicketClosed } from "../services/ticketService.js";
-import { assignRecruiter, saveAnswers, saveLogMessageRef, setStatus } from "../services/recruitmentService.js";
+import { assignRecruiter, saveAnswers, saveLogMessageRef, setStatus as setApplicationStatus } from "../services/recruitmentService.js";
 import {
   RECRUITMENT_STATUS_CHOICES,
   buildRecruitmentActionRow,
@@ -23,7 +20,16 @@ import {
   resolveRecruitmentLogChannel,
 } from "../services/recruitmentLogService.js";
 import { getItem, listActive } from "../services/catalogService.js";
-import { addItemFromAnswers, computeTotal, getOrCreateOrder, getOrderByTicket } from "../services/orderService.js";
+import {
+  addItemFromAnswers,
+  getOrCreateOrder,
+  getOrderByTicket,
+  markConfirmed,
+  removeItem as removeOrderItem,
+  setPaymentStatus,
+  setStatus as setOrderStatus,
+} from "../services/orderService.js";
+import { ORDER_STATUS_CHOICES, orderStatusLabel, sendInvoiceForOrder, upsertOrderMessage } from "../services/orderLogService.js";
 import { getGuildConfig, isStaffMember } from "../services/guildConfigService.js";
 import { logger } from "../utils/logger.js";
 
@@ -36,7 +42,9 @@ import { logger } from "../utils/logger.js";
  *   puis pilotage staff par boutons "recruitment:assign:<ticketId>" / "recruitment:status:<ticketId>"
  *   -> menu "recruitment:set-status:<ticketId>"
  * - Commande self-service : select "order:select-item" -> modal dynamique ->
- *   "order:submit-item:<catalogItemId>" -> boutons "order:add-more" / "order:confirm"
+ *   "order:submit-item:<catalogItemId>" -> boutons "order:add-more" / "order:confirm", puis
+ *   pilotage staff par boutons "order:status:<ticketId>" / "order:mark-paid:<ticketId>" /
+ *   "order:invoice:<ticketId>" / "order:remove-item:<ticketId>"
  */
 
 /** Questions fixes du formulaire de candidature (limite Discord : 5 champs max par modal). */
@@ -190,9 +198,7 @@ async function handleRecruitmentStatusButton(interaction: Interaction, ticketId:
  * Selection d'une etape dans le menu deroulant "Statut" : met a jour la candidature et le
  * message de suivi, puis remplace le menu ephemere par une confirmation textuelle (`update`
  * plutot que `reply`, pour editer ce meme message ephemere au lieu d'en empiler un nouveau).
- * Un passage a REFUSÉ clôture aussi le ticket cote suivi (voir `closeTicketIfRejected`) —
- * le bot ne peut pas fermer le salon Discord lui-meme (Ticket Tool n'a pas d'API), donc le
- * staff est invite a le faire via le bouton "Close" de Ticket Tool.
+ * Un passage a REFUSÉ clôture aussi le ticket (voir `closeTicketIfRejected`).
  */
 async function handleRecruitmentSetStatus(interaction: Interaction, ticketId: string): Promise<void> {
   if (!interaction.isStringSelectMenu()) return;
@@ -203,7 +209,7 @@ async function handleRecruitmentSetStatus(interaction: Interaction, ticketId: st
   }
 
   const status = interaction.values[0] as (typeof RECRUITMENT_STATUS_CHOICES)[number]["value"];
-  await setStatus(ticketId, status);
+  await setApplicationStatus(ticketId, status);
   await refreshRecruitmentLogMessage(interaction.client, ticketId);
 
   if (status === "REJECTED") {
@@ -215,9 +221,11 @@ async function handleRecruitmentSetStatus(interaction: Interaction, ticketId: st
 
 /**
  * Marque le ticket comme clôturé côté suivi (statut CLOSED, arrête l'escalade et les stats
- * "ouverts") quand une candidature passe à REFUSÉ, et poste un message dans le salon du
- * ticket pour prevenir le staff qu'il peut le fermer via Ticket Tool. No-op si le ticket
- * est deja ferme (evite un message en double si le statut est change plusieurs fois).
+ * "ouverts") quand une candidature passe à REFUSÉ, et envoie `$close` dans le salon pour
+ * declencher la fermeture cote Ticket Tool (confirme fonctionnel par l'utilisateur en test
+ * manuel — Ticket Tool n'a pas d'API, ce prefixe texte est le seul point d'entree externe
+ * disponible). No-op si le ticket est deja ferme (evite un envoi en double si le statut est
+ * change plusieurs fois).
  */
 async function closeTicketIfRejected(interaction: ButtonInteraction | StringSelectMenuInteraction, ticketId: string): Promise<void> {
   const ticket = await getTicketById(ticketId);
@@ -228,13 +236,10 @@ async function closeTicketIfRejected(interaction: ButtonInteraction | StringSele
   try {
     const channel = await interaction.client.channels.fetch(ticket.channelId);
     if (channel?.isTextBased() && !channel.isDMBased()) {
-      await channel.send(
-        "Cette candidature a été refusée : le ticket est marqué comme clôturé côté suivi. " +
-          "Le staff peut maintenant fermer ce salon via le bouton \"Close\" de Ticket Tool."
-      );
+      await channel.send("$close");
     }
   } catch (error) {
-    logger.error(`Echec notification de cloture pour le ticket ${ticketId}`, error);
+    logger.error(`Echec de la demande de fermeture Ticket Tool pour le ticket ${ticketId}`, error);
   }
 }
 
@@ -283,10 +288,8 @@ async function handleOrderSelectItem(interaction: Interaction): Promise<void> {
 
 /**
  * Soumission du modal d'un article : ajoute la ligne a la commande en cours (creee si besoin),
- * puis repost un embed recapitulatif complet de la commande (tous les articles ajoutes jusque-la,
- * pas seulement celui-ci) avec les boutons pour continuer ("Ajouter un article") ou terminer
- * ("Valider la commande"). Chaque soumission poste un nouveau message plutot que d'editer le
- * precedent, pour rester simple et robuste sans avoir a suivre un id de message entre interactions.
+ * puis cree ou edite en place l'unique message de commande du ticket (voir
+ * `orderLogService.upsertOrderMessage`) — plus de spam d'un nouveau message a chaque article.
  *
  * @param catalogItemId - extrait du customId du modal par l'appelant (`onInteractionCreate`)
  */
@@ -311,34 +314,16 @@ async function handleOrderSubmitItem(interaction: Interaction, catalogItemId: st
     value: interaction.fields.getTextInputValue(field.id),
   }));
   await addItemFromAnswers(order.id, item, answers);
+  await upsertOrderMessage(interaction.client, ticket.id);
 
-  const fullOrder = await getOrderByTicket(ticket.id);
-  const total = fullOrder ? computeTotal(fullOrder) : 0;
-
-  const embed = new EmbedBuilder()
-    .setTitle("Commande en cours")
-    .setColor(0x5865f2)
-    .setDescription(
-      (fullOrder?.items ?? [])
-        .map((i) => `**${i.name}** x${i.quantity} — ${(i.unitPrice * i.quantity).toLocaleString("fr-FR")} $`)
-        .join("\n") || "Aucun article"
-    )
-    .addFields({ name: "Total", value: `${total.toLocaleString("fr-FR")} $` });
-
-  const addMore = new ButtonBuilder().setCustomId("order:add-more").setLabel("Ajouter un article").setStyle(ButtonStyle.Secondary);
-  const confirm = new ButtonBuilder().setCustomId("order:confirm").setLabel("Valider la commande").setStyle(ButtonStyle.Success);
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(addMore, confirm);
-
-  if (interaction.channel?.isTextBased() && !interaction.channel.isDMBased()) {
-    await interaction.channel.send({ embeds: [embed], components: [row] });
-  }
   await interaction.reply({ content: "Article ajouté à la commande.", ephemeral: true });
 }
 
 /**
  * Clic sur "Ajouter un article" : re-affiche le menu deroulant du catalogue, en reponse
- * ephemere (visible seulement par le client) pour ne pas encombrer le salon d'un nouveau
- * menu a chaque fois.
+ * ephemere (visible seulement par celui qui clique) pour ne pas encombrer le salon d'un
+ * nouveau menu a chaque fois. Utilise a la fois par le client (avant validation) et par le
+ * staff (correction apres validation, meme bouton reutilise sur le message de suivi).
  */
 async function handleOrderAddMore(interaction: Interaction): Promise<void> {
   if (!interaction.isButton()) return;
@@ -366,10 +351,10 @@ async function handleOrderAddMore(interaction: Interaction): Promise<void> {
 }
 
 /**
- * Clic sur "Valider la commande" : etape finale du flux self-service cote client. Ne fait
- * plus aucune saisie du staff — se contente de poster le recap final et de ping les roles
- * staff configures, a charge pour eux de confirmer le paiement (`/order paid`) qui genere
- * la facture. Refuse si la commande est vide (rien a valider).
+ * Clic sur "Valider la commande" : etape finale du flux self-service cote client. Bascule
+ * le message de commande vers son style "suivi" (boutons staff) et ping les roles staff
+ * configures separement (un `content` modifie par edition ne notifie personne sur Discord,
+ * contrairement a un nouveau message). Refuse si la commande est vide.
  */
 async function handleOrderConfirm(interaction: Interaction): Promise<void> {
   if (!interaction.isButton()) return;
@@ -386,23 +371,161 @@ async function handleOrderConfirm(interaction: Interaction): Promise<void> {
     return;
   }
 
+  await markConfirmed(order.id);
+  await upsertOrderMessage(interaction.client, ticket.id);
+
   const config = await getGuildConfig(ticket.guildId);
   const mentions = (config?.staffRoleIds ?? []).map((roleId) => `<@&${roleId}>`).join(" ");
-  const total = computeTotal(order);
-
-  const embed = new EmbedBuilder()
-    .setTitle("Commande validée")
-    .setColor(0x57f287)
-    .setDescription(order.items.map((i) => `**${i.name}** x${i.quantity} — ${(i.unitPrice * i.quantity).toLocaleString("fr-FR")} $`).join("\n"))
-    .addFields({ name: "Total", value: `${total.toLocaleString("fr-FR")} $` });
-
   if (interaction.channel?.isTextBased() && !interaction.channel.isDMBased()) {
-    await interaction.channel.send({
-      content: mentions ? `${mentions} Nouvelle commande à traiter.` : "Nouvelle commande à traiter.",
-      embeds: [embed],
-    });
+    await interaction.channel.send(mentions ? `${mentions} Nouvelle commande à traiter.` : "Nouvelle commande à traiter.");
   }
   await interaction.reply({ content: "Commande validée, le staff a été notifié.", ephemeral: true });
+}
+
+/**
+ * Clic sur "Statut" (message de suivi d'une commande) : affiche, en ephemere, un menu
+ * deroulant des 4 statuts logistiques. Reserve au staff.
+ */
+async function handleOrderStatusButton(interaction: Interaction, ticketId: string): Promise<void> {
+  if (!interaction.isButton()) return;
+
+  if (!(await isStaffInteraction(interaction))) {
+    await interaction.reply({ content: NOT_STAFF_MESSAGE, ephemeral: true });
+    return;
+  }
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`order:set-status:${ticketId}`)
+    .setPlaceholder("Choisir un statut")
+    .addOptions(ORDER_STATUS_CHOICES.map((c) => ({ label: c.name, value: c.value })));
+
+  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+  await interaction.reply({ components: [row], ephemeral: true });
+}
+
+/** Selection d'un statut dans le menu deroulant "Statut" d'une commande. Reserve au staff. */
+async function handleOrderSetStatus(interaction: Interaction, ticketId: string): Promise<void> {
+  if (!interaction.isStringSelectMenu()) return;
+
+  if (!(await isStaffInteraction(interaction))) {
+    await interaction.reply({ content: NOT_STAFF_MESSAGE, ephemeral: true });
+    return;
+  }
+
+  const order = await getOrderByTicket(ticketId);
+  if (!order) {
+    await interaction.reply({ content: "Commande introuvable.", ephemeral: true });
+    return;
+  }
+
+  const status = interaction.values[0] as (typeof ORDER_STATUS_CHOICES)[number]["value"];
+  await setOrderStatus(order.id, status);
+  await upsertOrderMessage(interaction.client, ticketId);
+
+  await interaction.update({ content: `Statut mis à jour : **${orderStatusLabel(status)}**`, components: [] });
+}
+
+/**
+ * Clic sur "Marquer payée" (message de suivi d'une commande) : bascule le paiement a PAID
+ * et genere/poste automatiquement la facture. Reserve au staff. `deferReply` : le rendu de
+ * l'image (canvas) + son upload peuvent depasser le delai de 3s avant lequel Discord attend
+ * une premiere reponse a l'interaction.
+ */
+async function handleOrderMarkPaid(interaction: Interaction, ticketId: string): Promise<void> {
+  if (!interaction.isButton()) return;
+
+  if (!(await isStaffInteraction(interaction))) {
+    await interaction.reply({ content: NOT_STAFF_MESSAGE, ephemeral: true });
+    return;
+  }
+
+  const ticket = await getTicketById(ticketId);
+  const order = await getOrderByTicket(ticketId);
+  if (!ticket || !order || order.items.length === 0) {
+    await interaction.reply({ content: "Commande introuvable ou vide.", ephemeral: true });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+  await setPaymentStatus(order.id, "PAID");
+  await upsertOrderMessage(interaction.client, ticketId);
+
+  const updated = await getOrderByTicket(ticketId);
+  if (updated) await sendInvoiceForOrder(interaction.client, ticket.guildId, ticket, updated);
+
+  await interaction.editReply("Commande marquée payée, facture générée.");
+}
+
+/**
+ * Clic sur "Facture" (message de suivi d'une commande) : regenere/renvoie l'image de
+ * facture sans changer le statut de paiement. Reserve au staff.
+ */
+async function handleOrderInvoiceButton(interaction: Interaction, ticketId: string): Promise<void> {
+  if (!interaction.isButton()) return;
+
+  if (!(await isStaffInteraction(interaction))) {
+    await interaction.reply({ content: NOT_STAFF_MESSAGE, ephemeral: true });
+    return;
+  }
+
+  const ticket = await getTicketById(ticketId);
+  const order = await getOrderByTicket(ticketId);
+  if (!ticket || !order || order.items.length === 0) {
+    await interaction.reply({ content: "Commande introuvable ou vide.", ephemeral: true });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+  await sendInvoiceForOrder(interaction.client, ticket.guildId, ticket, order);
+  await interaction.editReply("Facture renvoyée.");
+}
+
+/**
+ * Clic sur "Retirer un article" (message de suivi d'une commande) : affiche, en ephemere,
+ * un menu deroulant des lignes actuelles de la commande. Reserve au staff.
+ */
+async function handleOrderRemoveItemButton(interaction: Interaction, ticketId: string): Promise<void> {
+  if (!interaction.isButton()) return;
+
+  if (!(await isStaffInteraction(interaction))) {
+    await interaction.reply({ content: NOT_STAFF_MESSAGE, ephemeral: true });
+    return;
+  }
+
+  const order = await getOrderByTicket(ticketId);
+  if (!order || order.items.length === 0) {
+    await interaction.reply({ content: "Aucun article dans cette commande.", ephemeral: true });
+    return;
+  }
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`order:remove-item-select:${ticketId}`)
+    .setPlaceholder("Choisir l'article a retirer")
+    .addOptions(
+      order.items.slice(0, 25).map((item) => ({
+        label: `${item.name} x${item.quantity}`.slice(0, 100),
+        description: `${(item.unitPrice * item.quantity).toLocaleString("fr-FR")} $`,
+        value: item.id,
+      }))
+    );
+
+  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+  await interaction.reply({ components: [row], ephemeral: true });
+}
+
+/** Selection d'un article a retirer dans le menu deroulant "Retirer un article". Reserve au staff. */
+async function handleOrderRemoveItemSelect(interaction: Interaction, ticketId: string): Promise<void> {
+  if (!interaction.isStringSelectMenu()) return;
+
+  if (!(await isStaffInteraction(interaction))) {
+    await interaction.reply({ content: NOT_STAFF_MESSAGE, ephemeral: true });
+    return;
+  }
+
+  await removeOrderItem(interaction.values[0]);
+  await upsertOrderMessage(interaction.client, ticketId);
+
+  await interaction.update({ content: "Article retiré de la commande.", components: [] });
 }
 
 /**
@@ -422,6 +545,12 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       return;
     }
 
+    if (interaction.isAutocomplete()) {
+      const command = commandsByName.get(interaction.commandName);
+      await command?.autocomplete?.(interaction);
+      return;
+    }
+
     if (interaction.isButton()) {
       if (interaction.customId === "recruitment:start-form") return handleRecruitmentStartForm(interaction);
       if (interaction.customId.startsWith("recruitment:assign:")) {
@@ -432,6 +561,18 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       }
       if (interaction.customId === "order:add-more") return handleOrderAddMore(interaction);
       if (interaction.customId === "order:confirm") return handleOrderConfirm(interaction);
+      if (interaction.customId.startsWith("order:status:")) {
+        return handleOrderStatusButton(interaction, interaction.customId.slice("order:status:".length));
+      }
+      if (interaction.customId.startsWith("order:mark-paid:")) {
+        return handleOrderMarkPaid(interaction, interaction.customId.slice("order:mark-paid:".length));
+      }
+      if (interaction.customId.startsWith("order:invoice:")) {
+        return handleOrderInvoiceButton(interaction, interaction.customId.slice("order:invoice:".length));
+      }
+      if (interaction.customId.startsWith("order:remove-item:")) {
+        return handleOrderRemoveItemButton(interaction, interaction.customId.slice("order:remove-item:".length));
+      }
       return;
     }
 
@@ -439,6 +580,12 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "order:select-item") return handleOrderSelectItem(interaction);
       if (interaction.customId.startsWith("recruitment:set-status:")) {
         return handleRecruitmentSetStatus(interaction, interaction.customId.slice("recruitment:set-status:".length));
+      }
+      if (interaction.customId.startsWith("order:set-status:")) {
+        return handleOrderSetStatus(interaction, interaction.customId.slice("order:set-status:".length));
+      }
+      if (interaction.customId.startsWith("order:remove-item-select:")) {
+        return handleOrderRemoveItemSelect(interaction, interaction.customId.slice("order:remove-item-select:".length));
       }
       return;
     }

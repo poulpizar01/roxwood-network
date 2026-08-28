@@ -45,15 +45,16 @@ Aucun port n'est expose publiquement (le bot ne fait que des connexions sortante
 - `/config set-staff-role` : role(s) considere(s) comme staff (pour le temps de premiere reponse, les pings d'escalade, les notifications de nouvelle commande, et l'usage des boutons Statut/S'assigner).
 - `/config set-escalation-timeout` : delai en minutes avant qu'un ticket sans reponse staff declenche une escalade (0 = desactive).
 - `/config set-recruitment-channel [channel]` : salon dedie ou poster le suivi des candidatures (recap + boutons), pour ne pas encombrer le salon du ticket partage avec le candidat. Sans salon configure, le recap est poste dans le salon du ticket lui-meme.
-- `/config set-recruitment-open <open>` : ouvre/ferme les recrutements. Fermes, les nouveaux tickets Recrutement affichent un message "recrutements fermes" au lieu du bouton de formulaire (les candidatures deja en cours ne sont pas affectees).
+
+L'ouverture/fermeture globale des recrutements est une commande a part : `/recruitment status <Ouvert|Fermé>`. Fermes, les nouveaux tickets Recrutement affichent un message "recrutements fermés" au lieu du bouton de formulaire (les candidatures deja en cours ne sont pas affectees).
 
 ## Recrutement
 
-A l'ouverture d'un ticket dans une categorie de type Recrutement (et si les recrutements sont ouverts, voir `/config set-recruitment-open`), le bot poste un bouton "Remplir le formulaire" qui ouvre un modal Discord (5 questions fixes : Nom RP, Age, Experience RP, Disponibilites, Motivation — les modals Discord ne supportent pas l'upload de fichier). A la soumission, le candidat recoit une confirmation qui l'invite aussi a envoyer d'eventuelles photos/documents **directement en message** dans le salon : le bot les rattache automatiquement a la candidature.
+A l'ouverture d'un ticket dans une categorie de type Recrutement (et si les recrutements sont ouverts, voir `/recruitment status`), le bot poste un bouton "Remplir le formulaire" qui ouvre un modal Discord (5 questions fixes : Nom RP, Age, Experience RP, Disponibilites, Motivation — les modals Discord ne supportent pas l'upload de fichier). A la soumission, le candidat recoit une confirmation qui l'invite aussi a envoyer d'eventuelles photos/documents **directement en message** dans le salon : le bot les rattache automatiquement a la candidature.
 
 Un recap (candidat, statut, recruteur, reponses, pieces jointes) est poste dans le salon de suivi (`/config set-recruitment-channel`, ou le salon du ticket par defaut) avec deux boutons :
 
-- **Statut** — ouvre un menu deroulant ephemere (En attente / Entretien / Accepte / Refuse) ; le message de suivi se met a jour automatiquement. Passer une candidature a **Refuse** marque aussi le ticket comme clôture côté suivi (arrête l'escalade, sort des stats "ouverts") et previent le staff dans le salon du ticket qu'il peut le fermer via Ticket Tool (le bot n'a pas de moyen de le fermer lui-meme, Ticket Tool n'ayant pas d'API).
+- **Statut** — ouvre un menu deroulant ephemere (En attente / Entretien / Accepte / Refuse) ; le message de suivi se met a jour automatiquement. Passer une candidature a **Refuse** marque aussi le ticket comme clôturé côté suivi (arrête l'escalade, sort des stats "ouverts") et envoie `$close` dans le salon pour déclencher la fermeture côté Ticket Tool (préfixe texte confirmé fonctionnel manuellement — Ticket Tool n'a pas d'API, donc aucun autre point d'entrée n'est disponible pour le déclencher depuis le bot).
 - **S'assigner** — assigne directement le membre du staff qui clique comme recruteur (reassignation possible).
 
 Ces boutons sont reserves au staff (`/config set-staff-role`) : un clic par quelqu'un d'autre est refuse avec un message explicite. `/ticket info`, execute dans le salon du ticket, affiche aussi le statut de la candidature et le recruteur assigne.
@@ -62,12 +63,12 @@ Le bot supprime aussi automatiquement, dans tout ticket suivi, les messages post
 
 ## Service client (catalogue + commande self-service)
 
-Le staff configure le catalogue, le **client compose sa commande lui-meme** dans le ticket :
+Le staff configure le catalogue, le **client compose sa commande lui-meme** dans le ticket, et un seul message de commande est édité en place tout au long du cycle (composition → validation → suivi) plutôt que reposté a chaque fois :
 
 1. `/catalog add <name> <price> <image> [description]` — cree un article (photo obligatoire).
-2. `/catalog field-add <item> <label> <style> [required]` — jusqu'a 5 champs par article, a remplir par le client lors de la commande (ex: date + nombre d'invites pour une salle, quantite + boisson pour un menu). Le style `Quantite` alimente automatiquement le calcul du prix ; les autres styles (`Texte court`/`Texte long`) sont juste enregistres et affiches sur la facture.
+2. `/catalog field-add <item> <label> <style> [required]` — jusqu'a 5 champs par article, a remplir par le client lors de la commande (ex: date + nombre d'invites pour une salle, quantite + boisson pour un menu). Le style `Quantite` alimente automatiquement le calcul du prix ; les autres styles (`Texte court`/`Texte long`) sont juste enregistres et affiches sur la facture. Les options d'article (`id`/`item`/`field-id`) proposent une recherche par nom en tapant, pas besoin de copier un identifiant.
 3. A l'ouverture d'un ticket Service, le bot poste un menu deroulant du catalogue actif. Le client choisit un article -> un formulaire genere a partir des champs configures s'ouvre -> il peut ajouter d'autres articles -> "Valider la commande" ping le role staff.
-4. Cote staff : `/order status`, `/order paid` (marque payee et **genere/poste automatiquement l'image de facture**), `/order invoice` (renvoie l'image), `/order add-item`/`remove-item` pour des corrections manuelles exceptionnelles.
+4. Cote staff, directement sur le message de commande : **Statut** (menu deroulant), **Marquer payée** (bascule le paiement et **genere/poste automatiquement l'image de facture**), **Facture** (renvoie l'image), **Ajouter un article** (reutilise le menu du client), **Retirer un article** (menu des lignes existantes) — pour des corrections manuelles exceptionnelles. Boutons reserves au staff.
 
 Autres commandes catalogue : `/catalog list`, `/catalog view <id>`, `/catalog remove <id>`, `/catalog field-remove <field-id>`.
 

@@ -1,17 +1,12 @@
 import { PermissionFlagsBits, SlashCommandBuilder, ChannelType } from "discord.js";
 import type { Command } from "./types.js";
-import {
-  setTicketCategory,
-  addStaffRole,
-  setEscalationMinutes,
-  setRecruitmentLogChannel,
-  setRecruitmentOpen,
-} from "../services/guildConfigService.js";
+import { setTicketCategory, addStaffRole, setEscalationMinutes, setRecruitmentLogChannel } from "../services/guildConfigService.js";
 
 /**
  * `/config` : commande d'administration (reservee `ManageGuild`) pour parametrer le bot sur
  * ce serveur — associer des categories a un type de ticket, definir le staff, regler l'escalade,
- * choisir le salon de suivi des candidatures, ouvrir/fermer les recrutements.
+ * choisir le salon de suivi des candidatures. L'ouverture/fermeture des recrutements est une
+ * commande a part, `/recruitment status` (voir `commands/recruitment.ts`).
  * Toutes les sous-commandes ecrivent dans le `GuildConfig` de la guilde courante uniquement
  * (voir `guildConfigService.ts`).
  */
@@ -68,12 +63,6 @@ export const configCommand: Command = {
             .addChannelTypes(ChannelType.GuildText)
             .setRequired(false)
         )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("set-recruitment-open")
-        .setDescription("Ouvrir ou fermer les recrutements (formulaire ou message \"fermé\" sur les nouveaux tickets)")
-        .addBooleanOption((opt) => opt.setName("open").setDescription("true = ouvert, false = fermé").setRequired(true))
     ) as SlashCommandBuilder,
 
   async execute(interaction) {
@@ -118,18 +107,6 @@ export const configCommand: Command = {
         content: channel
           ? `Suivi des candidatures posté désormais dans <#${channel.id}>.`
           : "Suivi des candidatures repostera dans le salon de chaque ticket.",
-        ephemeral: true,
-      });
-      return;
-    }
-
-    if (sub === "set-recruitment-open") {
-      const open = interaction.options.getBoolean("open", true);
-      await setRecruitmentOpen(interaction.guildId, open);
-      await interaction.reply({
-        content: open
-          ? "Recrutements ouverts : les nouveaux tickets affichent le formulaire de candidature."
-          : "Recrutements fermés : les nouveaux tickets afficheront un message \"fermé\" au lieu du formulaire.",
         ephemeral: true,
       });
     }

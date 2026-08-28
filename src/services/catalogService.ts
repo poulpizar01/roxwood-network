@@ -104,3 +104,33 @@ export async function listFields(guildId: string, itemId: string) {
   const item = await getItem(guildId, itemId);
   return item?.fields ?? [];
 }
+
+/**
+ * Recherche des articles par nom (sous-chaine, insensible a la casse), tous statuts
+ * confondus (actifs ou non — le staff doit pouvoir retrouver un article desactive pour le
+ * consulter/reactiver). Utilise par l'autocomplete des commandes `/catalog` pour eviter au
+ * staff de devoir copier-coller un id opaque.
+ */
+export async function searchItems(guildId: string, query: string) {
+  return prisma.catalogItem.findMany({
+    where: { guildId, name: { contains: query, mode: "insensitive" } },
+    orderBy: { createdAt: "asc" },
+    take: 25,
+  });
+}
+
+/**
+ * Recherche des champs personnalises (avec leur article parent) par libelle de champ ou
+ * nom d'article, pour l'autocomplete de `/catalog field-remove`.
+ */
+export async function searchFields(guildId: string, query: string) {
+  return prisma.catalogItemField.findMany({
+    where: {
+      catalogItem: { guildId },
+      OR: [{ label: { contains: query, mode: "insensitive" } }, { catalogItem: { name: { contains: query, mode: "insensitive" } } }],
+    },
+    include: { catalogItem: true },
+    orderBy: { position: "asc" },
+    take: 25,
+  });
+}

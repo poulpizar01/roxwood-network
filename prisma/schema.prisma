@@ -268,6 +268,14 @@ model ServiceOrder {
   /// Numero de facture, genere (et fige) a la premiere generation de facture. `null` tant
   /// qu'aucune facture n'a jamais ete emise pour cette commande.
   invoiceNumber String?       @unique
+  /// Id de l'unique message de commande dans le salon du ticket (recap + boutons), edite en
+  /// place a chaque changement (composition, validation, statut, paiement...) plutot que
+  /// reposte a chaque fois. Toujours dans le salon du ticket (pas de salon de suivi dedie
+  /// pour les commandes, contrairement au recrutement).
+  confirmationMessageId String?
+  /// True une fois que le client a clique "Valider la commande" — determine quel style
+  /// d'embed/boutons afficher sur le message de commande (composition vs suivi/facturation).
+  confirmed     Boolean       @default(false)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 

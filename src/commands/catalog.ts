@@ -1,6 +1,6 @@
 import { EmbedBuilder, PermissionFlagsBits, SlashCommandBuilder } from "discord.js";
 import type { Command } from "./types.js";
-import { addField, addItem, getItem, listActive, removeField, removeItem } from "../services/catalogService.js";
+import { addField, addItem, getItem, listActive, removeField, removeItem, searchFields, searchItems } from "../services/catalogService.js";
 
 /**
  * Styles de champ proposes au staff pour `field-add`. "Quantite" est un choix special :
@@ -18,6 +18,9 @@ const FIELD_STYLE_CHOICES = [
  * configure le catalogue de produits/services et les champs que le client devra remplir
  * en commandant chaque article. C'est cette configuration qui pilote le formulaire dynamique
  * genere cote client (voir `handleOrderSelectItem` dans interactionCreate.ts).
+ *
+ * Les options "id"/"item"/"field-id" sont en autocomplete (recherche par nom au fil de la
+ * frappe) plutot qu'en saisie libre d'un id opaque — voir la methode `autocomplete` ci-dessous.
  */
 export const catalogCommand: Command = {
   data: new SlashCommandBuilder()
@@ -37,20 +40,20 @@ export const catalogCommand: Command = {
       sub
         .setName("remove")
         .setDescription("Retirer un article du catalogue")
-        .addStringOption((opt) => opt.setName("id").setDescription("Identifiant de l'article").setRequired(true))
+        .addStringOption((opt) => opt.setName("id").setDescription("Article à retirer").setRequired(true).setAutocomplete(true))
     )
     .addSubcommand((sub) => sub.setName("list").setDescription("Lister les articles actifs"))
     .addSubcommand((sub) =>
       sub
         .setName("view")
         .setDescription("Voir le détail d'un article")
-        .addStringOption((opt) => opt.setName("id").setDescription("Identifiant de l'article").setRequired(true))
+        .addStringOption((opt) => opt.setName("id").setDescription("Article à consulter").setRequired(true).setAutocomplete(true))
     )
     .addSubcommand((sub) =>
       sub
         .setName("field-add")
         .setDescription("Ajouter un champ à remplir par le client pour cet article (5 max)")
-        .addStringOption((opt) => opt.setName("item").setDescription("Identifiant de l'article").setRequired(true))
+        .addStringOption((opt) => opt.setName("item").setDescription("Article concerné").setRequired(true).setAutocomplete(true))
         .addStringOption((opt) => opt.setName("label").setDescription("Intitulé du champ").setRequired(true))
         .addStringOption((opt) =>
           opt.setName("style").setDescription("Type de champ").setRequired(true).addChoices(...FIELD_STYLE_CHOICES)
@@ -61,7 +64,9 @@ export const catalogCommand: Command = {
       sub
         .setName("field-remove")
         .setDescription("Retirer un champ")
-        .addStringOption((opt) => opt.setName("field-id").setDescription("Identifiant du champ").setRequired(true))
+        .addStringOption((opt) =>
+          opt.setName("field-id").setDescription("Champ à retirer").setRequired(true).setAutocomplete(true)
+        )
     ) as SlashCommandBuilder,
 
   async execute(interaction) {
@@ -141,6 +146,24 @@ export const catalogCommand: Command = {
       const fieldId = interaction.options.getString("field-id", true);
       await removeField(interaction.guildId, fieldId);
       await interaction.reply({ content: "Champ retire (s'il existait).", ephemeral: true });
+    }
+  },
+
+  async autocomplete(interaction) {
+    if (!interaction.inGuild()) return;
+    const focused = interaction.options.getFocused(true);
+
+    if (focused.name === "id" || focused.name === "item") {
+      const items = await searchItems(interaction.guildId, focused.value);
+      await interaction.respond(
+        items.map((i) => ({ name: `${i.name} — ${i.price.toLocaleString("fr-FR")} $`.slice(0, 100), value: i.id }))
+      );
+      return;
+    }
+
+    if (focused.name === "field-id") {
+      const fields = await searchFields(interaction.guildId, focused.value);
+      await interaction.respond(fields.map((f) => ({ name: `${f.catalogItem.name} — ${f.label}`.slice(0, 100), value: f.id })));
     }
   },
 };
