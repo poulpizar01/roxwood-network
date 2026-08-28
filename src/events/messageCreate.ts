@@ -9,8 +9,11 @@ import { logger } from "../utils/logger.js";
 /**
  * Handler de l'evenement `messageCreate`, restreint aux canaux qui sont des tickets suivis
  * et encore ouverts. Responsabilites :
- * 1. supprimer les messages postes par d'autres bots (ex: message de bienvenue de Ticket
- *    Tool) pour garder le salon propre autour de notre propre intro ;
+ * 1. supprimer les messages purement informatifs postes par d'autres bots pour garder le
+ *    salon propre autour de notre propre intro — mais jamais un message qui porte un bouton
+ *    ou un menu (typiquement le bouton "Close" de Ticket Tool) : impossible de simuler un
+ *    clic sur un composant d'un autre bot (Discord ne le permet pas), donc ce bouton reste
+ *    le seul moyen reel de fermer un ticket cote Ticket Tool et doit rester accessible au staff ;
  * 2. mettre a jour l'activite du ticket (base du calcul d'escalade) ;
  * 3. detecter la premiere reponse d'un membre du staff ;
  * 4. sur un ticket de recrutement, rattacher les pieces jointes envoyees par le candidat
@@ -25,10 +28,9 @@ export async function onMessageCreate(message: Message): Promise<void> {
   if (!ticket || ticket.status !== "OPEN") return;
 
   if (message.author.bot) {
-    // Supprime tout message poste par un autre bot dans un ticket suivi (typiquement le
-    // message de bienvenue de Ticket Tool). Necessite la permission Discord "Gerer les
-    // messages" sur le role du bot ; echoue silencieusement (juste logge) sinon.
-    if (message.author.id !== message.client.user?.id) {
+    // Necessite la permission Discord "Gerer les messages" sur le role du bot ; echoue
+    // silencieusement (juste logge) sinon.
+    if (message.author.id !== message.client.user?.id && message.components.length === 0) {
       await message.delete().catch((error) => logger.warn(`Echec suppression du message de ${message.author.id} dans ${message.channelId}`, error));
     }
     return;

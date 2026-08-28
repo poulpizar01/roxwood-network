@@ -221,11 +221,16 @@ async function handleRecruitmentSetStatus(interaction: Interaction, ticketId: st
 
 /**
  * Marque le ticket comme clôturé côté suivi (statut CLOSED, arrête l'escalade et les stats
- * "ouverts") quand une candidature passe à REFUSÉ, et envoie `$close` dans le salon pour
- * declencher la fermeture cote Ticket Tool (confirme fonctionnel par l'utilisateur en test
- * manuel — Ticket Tool n'a pas d'API, ce prefixe texte est le seul point d'entree externe
- * disponible). No-op si le ticket est deja ferme (evite un envoi en double si le statut est
- * change plusieurs fois).
+ * "ouverts") quand une candidature passe à REFUSÉ, et invite le staff à fermer le salon
+ * cote Ticket Tool. Fermeture reellement automatisee testee et abandonnee : ni `channel.send`
+ * (le bot) ni un message via webhook de salon ne declenchent le `$close` de Ticket Tool —
+ * confirme empiriquement que Ticket Tool ignore tout message qui n'est pas poste par un vrai
+ * utilisateur humain (bot ou webhook, meme resultat). Cliquer le bouton "Close" de Ticket
+ * Tool a la place d'un humain n'est de toute facon pas possible (Discord ne permet pas a un
+ * bot de simuler l'interaction d'un autre bot) — donc pas d'alternative automatisee restante,
+ * et le bouton natif de Ticket Tool doit rester intact (voir le filtre sur les messages a
+ * composants dans `messageCreate.ts`, pour ne pas le supprimer par erreur). No-op si le
+ * ticket est deja ferme (evite un message en double si le statut est change plusieurs fois).
  */
 async function closeTicketIfRejected(interaction: ButtonInteraction | StringSelectMenuInteraction, ticketId: string): Promise<void> {
   const ticket = await getTicketById(ticketId);
@@ -236,10 +241,13 @@ async function closeTicketIfRejected(interaction: ButtonInteraction | StringSele
   try {
     const channel = await interaction.client.channels.fetch(ticket.channelId);
     if (channel?.isTextBased() && !channel.isDMBased()) {
-      await channel.send("$close");
+      await channel.send(
+        "Cette candidature a été refusée : le ticket est marqué comme clôturé côté suivi. " +
+          "Le staff peut maintenant fermer ce salon via le bouton \"Close\" de Ticket Tool."
+      );
     }
   } catch (error) {
-    logger.error(`Echec de la demande de fermeture Ticket Tool pour le ticket ${ticketId}`, error);
+    logger.error(`Echec notification de cloture pour le ticket ${ticketId}`, error);
   }
 }
 

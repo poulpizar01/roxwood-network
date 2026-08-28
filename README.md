@@ -54,12 +54,12 @@ A l'ouverture d'un ticket dans une categorie de type Recrutement (et si les recr
 
 Un recap (candidat, statut, recruteur, reponses, pieces jointes) est poste dans le salon de suivi (`/config set-recruitment-channel`, ou le salon du ticket par defaut) avec deux boutons :
 
-- **Statut** — ouvre un menu deroulant ephemere (En attente / Entretien / Accepte / Refuse) ; le message de suivi se met a jour automatiquement. Passer une candidature a **Refuse** marque aussi le ticket comme clôturé côté suivi (arrête l'escalade, sort des stats "ouverts") et envoie `$close` dans le salon pour déclencher la fermeture côté Ticket Tool (préfixe texte confirmé fonctionnel manuellement — Ticket Tool n'a pas d'API, donc aucun autre point d'entrée n'est disponible pour le déclencher depuis le bot).
+- **Statut** — ouvre un menu deroulant ephemere (En attente / Entretien / Accepte / Refuse) ; le message de suivi se met a jour automatiquement. Passer une candidature a **Refuse** marque aussi le ticket comme clôturé côté suivi (arrête l'escalade, sort des stats "ouverts") et prévient le staff dans le salon qu'il peut le fermer via le bouton "Close" de Ticket Tool. La fermeture automatisée a été testée (message direct du bot, puis via webhook de salon) et abandonnée : Ticket Tool ignore tout message qui ne vient pas d'un vrai humain, et un bot ne peut de toute façon pas cliquer le bouton d'un autre bot à sa place (limite Discord). C'est pour ça que le bot ne supprime jamais les messages d'un autre bot qui portent un bouton/menu (voir plus bas) : celui de Ticket Tool doit rester cliquable.
 - **S'assigner** — assigne directement le membre du staff qui clique comme recruteur (reassignation possible).
 
 Ces boutons sont reserves au staff (`/config set-staff-role`) : un clic par quelqu'un d'autre est refuse avec un message explicite. `/ticket info`, execute dans le salon du ticket, affiche aussi le statut de la candidature et le recruteur assigne.
 
-Le bot supprime aussi automatiquement, dans tout ticket suivi, les messages postes par d'autres bots (typiquement le message de bienvenue de Ticket Tool) pour garder le salon propre autour de sa propre intro. Necessite que le role du bot ait la permission Discord **"Gerer les messages"** sur le serveur ; sans elle, la suppression echoue silencieusement (juste loggee).
+Le bot supprime aussi automatiquement, dans tout ticket suivi, les messages purement informatifs postes par d'autres bots pour garder le salon propre — mais jamais un message qui porte un bouton ou un menu (typiquement le message de bienvenue de Ticket Tool avec son bouton "Close"), pour ne pas priver le staff de sa seule vraie méthode de fermeture. Necessite que le role du bot ait la permission Discord **"Gerer les messages"** sur le serveur ; sans elle, la suppression echoue silencieusement (juste loggee).
 
 ## Service client (catalogue + commande self-service)
 
