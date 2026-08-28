@@ -43,11 +43,11 @@ export const statsCommand: Command = {
       .setTitle("Statistiques des tickets")
       .addFields(
         { name: "Ouverts", value: String(open), inline: true },
-        { name: "Fermes", value: String(closed), inline: true },
+        { name: "Fermés", value: String(closed), inline: true },
         { name: "Escalades", value: String(escalated), inline: true },
         {
-          name: "Temps de reponse moyen (staff)",
-          value: avgResponseMinutes !== null ? `${avgResponseMinutes} min` : "pas de donnees",
+          name: "Temps de réponse moyen (staff)",
+          value: avgResponseMinutes !== null ? `${avgResponseMinutes} min` : "pas de données",
         }
       )
       .setColor(0x5865f2);

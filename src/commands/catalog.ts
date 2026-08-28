@@ -10,7 +10,7 @@ import { addField, addItem, getItem, listActive, removeField, removeItem } from 
 const FIELD_STYLE_CHOICES = [
   { name: "Texte court", value: "SHORT" },
   { name: "Texte long", value: "PARAGRAPH" },
-  { name: "Quantite", value: "QUANTITY" },
+  { name: "Quantité", value: "QUANTITY" },
 ] as const;
 
 /**
@@ -22,7 +22,7 @@ const FIELD_STYLE_CHOICES = [
 export const catalogCommand: Command = {
   data: new SlashCommandBuilder()
     .setName("catalog")
-    .setDescription("Gerer le catalogue de produits/services")
+    .setDescription("Gérer le catalogue de produits/services")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand((sub) =>
       sub
@@ -43,19 +43,19 @@ export const catalogCommand: Command = {
     .addSubcommand((sub) =>
       sub
         .setName("view")
-        .setDescription("Voir le detail d'un article")
+        .setDescription("Voir le détail d'un article")
         .addStringOption((opt) => opt.setName("id").setDescription("Identifiant de l'article").setRequired(true))
     )
     .addSubcommand((sub) =>
       sub
         .setName("field-add")
-        .setDescription("Ajouter un champ a remplir par le client pour cet article (5 max)")
+        .setDescription("Ajouter un champ à remplir par le client pour cet article (5 max)")
         .addStringOption((opt) => opt.setName("item").setDescription("Identifiant de l'article").setRequired(true))
-        .addStringOption((opt) => opt.setName("label").setDescription("Intitule du champ").setRequired(true))
+        .addStringOption((opt) => opt.setName("label").setDescription("Intitulé du champ").setRequired(true))
         .addStringOption((opt) =>
           opt.setName("style").setDescription("Type de champ").setRequired(true).addChoices(...FIELD_STYLE_CHOICES)
         )
-        .addBooleanOption((opt) => opt.setName("required").setDescription("Obligatoire ? (par defaut oui)").setRequired(false))
+        .addBooleanOption((opt) => opt.setName("required").setDescription("Obligatoire ? (par défaut oui)").setRequired(false))
     )
     .addSubcommand((sub) =>
       sub
@@ -75,7 +75,7 @@ export const catalogCommand: Command = {
       const description = interaction.options.getString("description") ?? undefined;
 
       const item = await addItem(interaction.guildId, { name, price, imageUrl: image.url, description });
-      await interaction.reply({ content: `Article cree : **${item.name}** (id: \`${item.id}\`)`, ephemeral: true });
+      await interaction.reply({ content: `Article créé : **${item.name}** (id: \`${item.id}\`)`, ephemeral: true });
       return;
     }
 
@@ -130,7 +130,7 @@ export const catalogCommand: Command = {
         // addField valide les regles metier (max 5 champs, au plus un QUANTITY) et leve une
         // Error au message deja redige pour l'utilisateur : on le relaie tel quel.
         await addField(interaction.guildId, itemId, { label, style, required });
-        await interaction.reply({ content: `Champ ajoute : **${label}**`, ephemeral: true });
+        await interaction.reply({ content: `Champ ajouté : **${label}**`, ephemeral: true });
       } catch (error) {
         await interaction.reply({ content: error instanceof Error ? error.message : "Erreur.", ephemeral: true });
       }

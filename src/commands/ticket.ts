@@ -23,11 +23,11 @@ async function buildTicketSummary(channelId: string) {
     .addFields(
       { name: "Type", value: ticket.type, inline: true },
       { name: "Statut", value: ticket.status, inline: true },
-      { name: "Priorite", value: ticket.priority, inline: true },
+      { name: "Priorité", value: ticket.priority, inline: true },
       { name: "Ouvert par", value: ticket.openerId ? `<@${ticket.openerId}>` : "inconnu", inline: true },
       { name: "Tags", value: ticket.tags.length ? ticket.tags.map((t) => t.tag).join(", ") : "aucun" },
       {
-        name: "1ere reponse staff",
+        name: "1ère réponse staff",
         value: ticket.firstStaffReplyAt ? `<t:${Math.floor(ticket.firstStaffReplyAt.getTime() / 1000)}:R>` : "en attente",
       }
     )
@@ -38,7 +38,7 @@ async function buildTicketSummary(channelId: string) {
     if (application) {
       embed.addFields({
         name: "Candidature",
-        value: `Statut : **${application.status}**\nRecruteur : ${application.recruiterId ? `<@${application.recruiterId}>` : "non assigne"}`,
+        value: `Statut : **${application.status}**\nRecruteur : ${application.recruiterId ? `<@${application.recruiterId}>` : "non assigné"}`,
       });
     }
   } else if (ticket.type === "SERVICE") {
@@ -63,16 +63,16 @@ async function buildTicketSummary(channelId: string) {
 export const ticketCommand: Command = {
   data: new SlashCommandBuilder()
     .setName("ticket")
-    .setDescription("Gerer le ticket courant")
+    .setDescription("Gérer le ticket courant")
     .addSubcommand((sub) => sub.setName("info").setDescription("Afficher le statut du ticket courant"))
     .addSubcommand((sub) =>
       sub
         .setName("priority")
-        .setDescription("Definir la priorite du ticket courant")
+        .setDescription("Définir la priorité du ticket courant")
         .addStringOption((opt) =>
           opt
             .setName("level")
-            .setDescription("Niveau de priorite")
+            .setDescription("Niveau de priorité")
             .setRequired(true)
             .addChoices(...PRIORITY_CHOICES.map((p) => ({ name: p, value: p })))
         )
@@ -80,7 +80,7 @@ export const ticketCommand: Command = {
     .addSubcommandGroup((group) =>
       group
         .setName("tag")
-        .setDescription("Gerer les tags du ticket courant")
+        .setDescription("Gérer les tags du ticket courant")
         .addSubcommand((sub) =>
           sub
             .setName("add")
@@ -116,7 +116,7 @@ export const ticketCommand: Command = {
     if (!group && sub === "priority") {
       const level = interaction.options.getString("level", true) as (typeof PRIORITY_CHOICES)[number];
       await prisma.ticket.update({ where: { id: ticket.id }, data: { priority: level } });
-      await interaction.reply(`Priorite mise a jour : **${level}**`);
+      await interaction.reply(`Priorité mise à jour : **${level}**`);
       return;
     }
 
@@ -130,7 +130,7 @@ export const ticketCommand: Command = {
           create: { ticketId: ticket.id, tag: tagName },
           update: {},
         });
-        await interaction.reply(`Tag ajoute : \`${tagName}\``);
+        await interaction.reply(`Tag ajouté : \`${tagName}\``);
         return;
       }
 

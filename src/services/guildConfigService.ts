@@ -38,17 +38,25 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfigWithCa
  * Retourne la config existante ou en cree une par defaut (staff/categories vides).
  * Utilise en interne par les fonctions d'ecriture ci-dessous, pour ne jamais echouer
  * sur une guilde configuree pour la premiere fois.
+ *
+ * `upsert` plutot qu'un `findUnique` + `create` separes : deux commandes `/config`
+ * lancees quasi simultanement sur une guilde jamais configuree verraient toutes les
+ * deux "n'existe pas" avant que l'une des deux n'ait fini d'ecrire, et la seconde
+ * `create()` echouerait alors sur la contrainte unique `guildId`. `upsert` est atomique
+ * cote Postgres et evite cette course.
  */
 async function ensureGuildConfig(guildId: string): Promise<GuildConfigWithCategories> {
-  const existing = await getGuildConfig(guildId);
-  if (existing) return existing;
+  const cached = cache.get(guildId);
+  if (cached) return cached;
 
-  const created = await prisma.guildConfig.create({
-    data: { guildId, staffRoleIds: [] },
+  const config = await prisma.guildConfig.upsert({
+    where: { guildId },
+    create: { guildId, staffRoleIds: [] },
+    update: {},
     include: { ticketCategories: true },
   });
-  cache.set(guildId, created);
-  return created;
+  cache.set(guildId, config);
+  return config;
 }
 
 /** Recharge la config depuis Postgres et remet le cache a jour. A appeler apres toute ecriture. */
@@ -121,6 +129,20 @@ export async function setRecruitmentLogChannel(guildId: string, channelId: strin
   await prisma.guildConfig.update({
     where: { guildId },
     data: { recruitmentLogChannelId: channelId },
+  });
+  return refresh(guildId);
+}
+
+/**
+ * Ouvre ou ferme les recrutements pour cette guilde. Fermer n'affecte que les nouveaux
+ * tickets RECRUITMENT (`onChannelCreate` affiche un message "recrutements fermes" au lieu
+ * du bouton de formulaire) — les candidatures deja en cours ne sont pas impactees.
+ */
+export async function setRecruitmentOpen(guildId: string, open: boolean): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.guildConfig.update({
+    where: { guildId },
+    data: { recruitmentOpen: open },
   });
   return refresh(guildId);
 }

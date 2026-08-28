@@ -75,7 +75,7 @@ export async function addField(
     throw new Error(`Un article ne peut pas avoir plus de ${MAX_FIELDS_PER_ITEM} champs (limite Discord).`);
   }
   if (data.style === "QUANTITY" && item.fields.some((f) => f.style === "QUANTITY")) {
-    throw new Error("Cet article a deja un champ de type quantite.");
+    throw new Error("Cet article a déjà un champ de type quantité.");
   }
 
   return prisma.catalogItemField.create({

@@ -16,9 +16,9 @@ import { renderInvoice } from "../services/invoiceImageService.js";
 /** Statuts logistiques disponibles pour une commande (independants du statut de paiement). */
 const ORDER_STATUS_CHOICES = [
   { name: "En attente", value: "PENDING" },
-  { name: "En preparation", value: "PREPARING" },
-  { name: "Livree", value: "DELIVERED" },
-  { name: "Annulee", value: "CANCELLED" },
+  { name: "En préparation", value: "PREPARING" },
+  { name: "Livrée", value: "DELIVERED" },
+  { name: "Annulée", value: "CANCELLED" },
 ] as const;
 
 /**
@@ -77,13 +77,13 @@ async function sendInvoice(
 export const orderCommand: Command = {
   data: new SlashCommandBuilder()
     .setName("order")
-    .setDescription("Gerer la commande du ticket courant (corrections staff)")
+    .setDescription("Gérer la commande du ticket courant (corrections staff)")
     .addSubcommand((sub) =>
       sub
         .setName("add-item")
-        .setDescription("Ajouter manuellement un article a la commande")
+        .setDescription("Ajouter manuellement un article à la commande")
         .addStringOption((opt) => opt.setName("catalog-item").setDescription("Identifiant de l'article catalogue").setRequired(true))
-        .addIntegerOption((opt) => opt.setName("quantity").setDescription("Quantite").setMinValue(1).setRequired(false))
+        .addIntegerOption((opt) => opt.setName("quantity").setDescription("Quantité").setMinValue(1).setRequired(false))
     )
     .addSubcommand((sub) =>
       sub
@@ -99,15 +99,15 @@ export const orderCommand: Command = {
           opt.setName("etape").setDescription("Nouveau statut").setRequired(true).addChoices(...ORDER_STATUS_CHOICES)
         )
     )
-    .addSubcommand((sub) => sub.setName("paid").setDescription("Marquer la commande comme payee et generer la facture"))
-    .addSubcommand((sub) => sub.setName("invoice").setDescription("Regenerer/renvoyer l'image de facture")) as SlashCommandBuilder,
+    .addSubcommand((sub) => sub.setName("paid").setDescription("Marquer la commande comme payée et générer la facture"))
+    .addSubcommand((sub) => sub.setName("invoice").setDescription("Régénérer/renvoyer l'image de facture")) as SlashCommandBuilder,
 
   async execute(interaction) {
     if (!interaction.inGuild()) return;
 
     const ticket = await getTicketByChannel(interaction.channelId);
     if (!ticket || ticket.type !== "SERVICE") {
-      await interaction.reply({ content: "Ce salon n'est pas rattache a une commande.", ephemeral: true });
+      await interaction.reply({ content: "Ce salon n'est pas rattaché à une commande.", ephemeral: true });
       return;
     }
 
@@ -127,7 +127,7 @@ export const orderCommand: Command = {
         return;
       }
       await addItem(order.id, item, quantity);
-      await interaction.reply(`Article ajoute : **${item.name}** x${quantity}`);
+      await interaction.reply(`Article ajouté : **${item.name}** x${quantity}`);
       return;
     }
 
@@ -147,7 +147,7 @@ export const orderCommand: Command = {
       }
       await setStatus(order.id, etape);
       const label = ORDER_STATUS_CHOICES.find((c) => c.value === etape)?.name ?? etape;
-      await interaction.reply(`Commande mise a jour : **${label}**`);
+      await interaction.reply(`Commande mise à jour : **${label}**`);
       return;
     }
 
@@ -163,7 +163,7 @@ export const orderCommand: Command = {
       await interaction.deferReply();
       const updated = await getOrderByTicket(ticket.id);
       await sendInvoice(interaction, ticket, updated);
-      await interaction.editReply(`Commande marquee payee (total : ${computeTotal(order).toLocaleString("fr-FR")} $).`);
+      await interaction.editReply(`Commande marquée payée (total : ${computeTotal(order).toLocaleString("fr-FR")} $).`);
       return;
     }
 
@@ -175,7 +175,7 @@ export const orderCommand: Command = {
       }
       await interaction.deferReply();
       await sendInvoice(interaction, ticket, order);
-      await interaction.editReply("Facture renvoyee.");
+      await interaction.editReply("Facture renvoyée.");
     }
   },
 };

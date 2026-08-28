@@ -21,6 +21,9 @@ model GuildConfig {
   /// pour que le suivi reste visible par le staff sans polluer le salon du ticket (partage
   /// avec le candidat). `null` = pas configure, le recap est poste dans le salon du ticket.
   recruitmentLogChannelId String?
+  /// Si `false`, les nouveaux tickets RECRUITMENT reçoivent un message "recrutements fermés"
+  /// au lieu du bouton de formulaire. N'affecte pas les candidatures deja en cours.
+  recruitmentOpen   Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -166,8 +169,9 @@ model RecruitmentApplication {
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
-  ticket  Ticket               @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  answers RecruitmentAnswer[]
+  ticket      Ticket                   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  answers     RecruitmentAnswer[]
+  attachments RecruitmentAttachment[]
 }
 
 /// Une reponse du candidat a une question du formulaire de candidature.
@@ -177,6 +181,21 @@ model RecruitmentAnswer {
   /// Libelle de la question (copie du formulaire au moment de la soumission).
   question      String
   answer        String
+
+  application RecruitmentApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+/// Fichier (image, document) envoye par le candidat directement en message dans le salon
+/// du ticket. Les modals Discord ne supportent pas l'upload de fichier nativement, donc
+/// c'est le seul moyen pour le candidat de joindre des pieces jointes a sa candidature.
+model RecruitmentAttachment {
+  id            String   @id @default(cuid())
+  applicationId String
+  /// URL Discord CDN du fichier (attention : les URLs d'attachment Discord sont signees et
+  /// expirent apres un certain temps — pas une solution d'archivage long terme fiable).
+  url           String
+  filename      String
+  createdAt     DateTime @default(now())
 
   application RecruitmentApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 }

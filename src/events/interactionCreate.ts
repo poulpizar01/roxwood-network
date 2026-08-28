@@ -12,8 +12,16 @@ import {
   type StringSelectMenuInteraction,
 } from "discord.js";
 import { commandsByName } from "../commands/index.js";
-import { getTicketByChannel, getTicketById } from "../services/ticketService.js";
-import { assignRecruiter, getApplication, saveAnswers, saveLogMessageRef, setStatus } from "../services/recruitmentService.js";
+import { getTicketByChannel, getTicketById, markTicketClosed } from "../services/ticketService.js";
+import { assignRecruiter, saveAnswers, saveLogMessageRef, setStatus } from "../services/recruitmentService.js";
+import {
+  RECRUITMENT_STATUS_CHOICES,
+  buildRecruitmentActionRow,
+  buildRecruitmentEmbed,
+  recruitmentStatusLabel,
+  refreshRecruitmentLogMessage,
+  resolveRecruitmentLogChannel,
+} from "../services/recruitmentLogService.js";
 import { getItem, listActive } from "../services/catalogService.js";
 import { addItemFromAnswers, computeTotal, getOrCreateOrder, getOrderByTicket } from "../services/orderService.js";
 import { getGuildConfig, isStaffMember } from "../services/guildConfigService.js";
@@ -32,20 +40,7 @@ import { logger } from "../utils/logger.js";
  */
 
 /** Questions fixes du formulaire de candidature (limite Discord : 5 champs max par modal). */
-const RECRUITMENT_QUESTIONS = ["Nom RP", "Age", "Experience RP", "Disponibilites", "Motivation"];
-
-/** Etapes du pipeline de recrutement proposees dans le menu deroulant "Statut". */
-const RECRUITMENT_STATUS_CHOICES = [
-  { name: "En attente", value: "PENDING" },
-  { name: "Entretien", value: "INTERVIEW" },
-  { name: "Accepte", value: "ACCEPTED" },
-  { name: "Refuse", value: "REJECTED" },
-] as const;
-
-/** Libelle affichable d'un statut de candidature (fallback sur la valeur brute si inconnue). */
-function recruitmentStatusLabel(status: string): string {
-  return RECRUITMENT_STATUS_CHOICES.find((c) => c.value === status)?.name ?? status;
-}
+const RECRUITMENT_QUESTIONS = ["Nom RP", "Âge", "Expérience RP", "Disponibilités", "Motivation"];
 
 /**
  * Verifie que l'utilisateur a l'origine d'une interaction sur un composant (bouton, menu)
@@ -63,84 +58,13 @@ async function isStaffInteraction(interaction: ButtonInteraction | StringSelectM
 }
 
 /**
- * Construit l'embed de suivi d'une candidature (candidat, salon, statut, recruteur,
- * reponses au formulaire). Reutilise a la fois pour le premier envoi et pour la mise a
- * jour du message apres un changement de statut/assignation.
+ * Message affiche quand `isStaffInteraction` refuse un clic. Explicite la cause (droits
+ * insuffisants, pas juste "ca ne marche pas") et l'action corrective, pour ne pas laisser
+ * un admin de test se demander pourquoi ses propres boutons ne repondent pas.
  */
-function buildRecruitmentEmbed(
-  ticket: { channelId: string; openerId: string | null },
-  application: { status: string; recruiterId: string | null; answers: { question: string; answer: string }[] }
-): EmbedBuilder {
-  return new EmbedBuilder()
-    .setTitle("Candidature")
-    .setColor(0x5865f2)
-    .addFields(
-      { name: "Candidat", value: ticket.openerId ? `<@${ticket.openerId}>` : "inconnu", inline: true },
-      { name: "Ticket", value: `<#${ticket.channelId}>`, inline: true },
-      { name: "Statut", value: `**${recruitmentStatusLabel(application.status)}**`, inline: true },
-      { name: "Recruteur", value: application.recruiterId ? `<@${application.recruiterId}>` : "non assigne", inline: true },
-      ...application.answers.map((a) => ({ name: a.question, value: a.answer || "-" }))
-    );
-}
-
-/** Boutons "Statut" et "S'assigner" affiches sous le message de suivi d'une candidature. */
-function buildRecruitmentActionRow(ticketId: string): ActionRowBuilder<ButtonBuilder> {
-  const statusButton = new ButtonBuilder()
-    .setCustomId(`recruitment:status:${ticketId}`)
-    .setLabel("Statut")
-    .setStyle(ButtonStyle.Secondary);
-  const assignButton = new ButtonBuilder()
-    .setCustomId(`recruitment:assign:${ticketId}`)
-    .setLabel("S'assigner")
-    .setStyle(ButtonStyle.Primary);
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(statusButton, assignButton);
-}
-
-/**
- * Determine ou poster le message de suivi d'une candidature : le salon dedie configure
- * par la guilde (`recruitmentLogChannelId`) si present et accessible, sinon le salon du
- * ticket lui-meme. Le repli est silencieux (juste logge) pour ne jamais bloquer l'envoi
- * du recap a cause d'une mauvaise configuration (salon supprime, permissions manquantes...).
- */
-async function resolveRecruitmentLogChannel(interaction: Interaction, ticketChannelId: string) {
-  const guildId = interaction.guildId;
-  const config = guildId ? await getGuildConfig(guildId) : null;
-  const configuredChannelId = config?.recruitmentLogChannelId;
-
-  if (configuredChannelId) {
-    try {
-      const channel = await interaction.client.channels.fetch(configuredChannelId);
-      if (channel?.isTextBased() && !channel.isDMBased()) return channel;
-    } catch (error) {
-      logger.warn(`Salon de suivi recrutement ${configuredChannelId} inaccessible, repli sur le salon du ticket`, error);
-    }
-  }
-
-  const fallback = await interaction.client.channels.fetch(ticketChannelId);
-  return fallback?.isTextBased() && !fallback.isDMBased() ? fallback : null;
-}
-
-/**
- * Recharge le ticket/la candidature depuis la base et met a jour en place le message de
- * suivi (embed + boutons), apres un changement de statut ou d'assignation. No-op silencieux
- * si le message de suivi n'a jamais ete envoye (candidature pas encore soumise) ou n'est
- * plus accessible (salon/message supprime) — journalise mais ne fait pas echouer l'action
- * qui a declenche la mise a jour (le statut/l'assignation reste change en base dans tous les cas).
- */
-async function refreshRecruitmentLogMessage(interaction: ButtonInteraction | StringSelectMenuInteraction, ticketId: string): Promise<void> {
-  const ticket = await getTicketById(ticketId);
-  const application = await getApplication(ticketId);
-  if (!ticket || !application || !application.logChannelId || !application.logMessageId) return;
-
-  try {
-    const channel = await interaction.client.channels.fetch(application.logChannelId);
-    if (!channel?.isTextBased() || channel.isDMBased()) return;
-    const message = await channel.messages.fetch(application.logMessageId);
-    await message.edit({ embeds: [buildRecruitmentEmbed(ticket, application)], components: [buildRecruitmentActionRow(ticketId)] });
-  } catch (error) {
-    logger.error(`Echec de mise a jour du message de suivi pour le ticket ${ticketId}`, error);
-  }
-}
+const NOT_STAFF_MESSAGE =
+  "Tu n'as pas les droits suffisants pour cette action : elle est réservée au staff. " +
+  "Demande à un administrateur de t'ajouter un rôle staff avec `/config set-staff-role`.";
 
 /** Route une commande slash vers son `Command.execute`, avec gestion d'erreur generique commune a toutes les commandes. */
 async function handleChatInputCommand(interaction: Interaction): Promise<void> {
@@ -153,7 +77,7 @@ async function handleChatInputCommand(interaction: Interaction): Promise<void> {
     await command.execute(interaction);
   } catch (error) {
     logger.error(`Erreur lors de l'execution de /${interaction.commandName}`, error);
-    const payload = { content: "Une erreur est survenue lors de l'execution de la commande.", ephemeral: true };
+    const payload = { content: "Une erreur est survenue lors de l'exécution de la commande.", ephemeral: true };
     if (interaction.replied || interaction.deferred) {
       await interaction.followUp(payload);
     } else {
@@ -187,15 +111,16 @@ async function handleRecruitmentStartForm(interaction: Interaction): Promise<voi
 /**
  * Soumission du formulaire de candidature : enregistre les reponses, puis poste le recap
  * complet (avec les boutons "Statut"/"S'assigner") dans le salon de suivi dedie a la guilde
- * si configure, sinon dans le salon du ticket lui-meme. Le candidat recoit juste une
- * confirmation courte, sans le detail de ses reponses republie publiquement.
+ * si configure, sinon dans le salon du ticket lui-meme. Le candidat recoit une confirmation
+ * qui l'invite aussi a envoyer d'eventuelles pieces jointes directement en message dans le
+ * salon (les modals Discord ne supportent pas l'upload de fichier).
  */
 async function handleRecruitmentSubmitForm(interaction: Interaction): Promise<void> {
   if (!interaction.isModalSubmit() || !interaction.channelId) return;
 
   const ticket = await getTicketByChannel(interaction.channelId);
   if (!ticket || ticket.type !== "RECRUITMENT") {
-    await interaction.reply({ content: "Ce salon n'est pas rattache a une candidature.", ephemeral: true });
+    await interaction.reply({ content: "Ce salon n'est pas rattaché à une candidature.", ephemeral: true });
     return;
   }
 
@@ -206,7 +131,7 @@ async function handleRecruitmentSubmitForm(interaction: Interaction): Promise<vo
 
   const application = await saveAnswers(ticket.id, answers);
 
-  const logChannel = await resolveRecruitmentLogChannel(interaction, ticket.channelId);
+  const logChannel = await resolveRecruitmentLogChannel(interaction.client, interaction.guildId, ticket.channelId);
   if (logChannel) {
     const message = await logChannel.send({
       embeds: [buildRecruitmentEmbed(ticket, application)],
@@ -215,7 +140,10 @@ async function handleRecruitmentSubmitForm(interaction: Interaction): Promise<vo
     await saveLogMessageRef(ticket.id, logChannel.id, message.id);
   }
 
-  await interaction.reply("Formulaire envoye, merci ! Notre equipe va examiner votre candidature.");
+  await interaction.reply(
+    "Formulaire envoyé, merci ! Notre équipe va examiner votre candidature. " +
+      "Vous pouvez aussi envoyer des photos ou documents directement dans ce salon si besoin."
+  );
 }
 
 /**
@@ -227,13 +155,13 @@ async function handleRecruitmentAssign(interaction: Interaction, ticketId: strin
   if (!interaction.isButton()) return;
 
   if (!(await isStaffInteraction(interaction))) {
-    await interaction.reply({ content: "Reserve au staff.", ephemeral: true });
+    await interaction.reply({ content: NOT_STAFF_MESSAGE, ephemeral: true });
     return;
   }
 
   await assignRecruiter(ticketId, interaction.user.id);
-  await refreshRecruitmentLogMessage(interaction, ticketId);
-  await interaction.reply({ content: "Vous etes assigne a cette candidature.", ephemeral: true });
+  await refreshRecruitmentLogMessage(interaction.client, ticketId);
+  await interaction.reply({ content: "Vous êtes assigné à cette candidature.", ephemeral: true });
 }
 
 /**
@@ -245,13 +173,13 @@ async function handleRecruitmentStatusButton(interaction: Interaction, ticketId:
   if (!interaction.isButton()) return;
 
   if (!(await isStaffInteraction(interaction))) {
-    await interaction.reply({ content: "Reserve au staff.", ephemeral: true });
+    await interaction.reply({ content: NOT_STAFF_MESSAGE, ephemeral: true });
     return;
   }
 
   const select = new StringSelectMenuBuilder()
     .setCustomId(`recruitment:set-status:${ticketId}`)
-    .setPlaceholder("Choisir une etape")
+    .setPlaceholder("Choisir une étape")
     .addOptions(RECRUITMENT_STATUS_CHOICES.map((c) => ({ label: c.name, value: c.value })));
 
   const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
@@ -262,20 +190,52 @@ async function handleRecruitmentStatusButton(interaction: Interaction, ticketId:
  * Selection d'une etape dans le menu deroulant "Statut" : met a jour la candidature et le
  * message de suivi, puis remplace le menu ephemere par une confirmation textuelle (`update`
  * plutot que `reply`, pour editer ce meme message ephemere au lieu d'en empiler un nouveau).
+ * Un passage a REFUSÉ clôture aussi le ticket cote suivi (voir `closeTicketIfRejected`) —
+ * le bot ne peut pas fermer le salon Discord lui-meme (Ticket Tool n'a pas d'API), donc le
+ * staff est invite a le faire via le bouton "Close" de Ticket Tool.
  */
 async function handleRecruitmentSetStatus(interaction: Interaction, ticketId: string): Promise<void> {
   if (!interaction.isStringSelectMenu()) return;
 
   if (!(await isStaffInteraction(interaction))) {
-    await interaction.reply({ content: "Reserve au staff.", ephemeral: true });
+    await interaction.reply({ content: NOT_STAFF_MESSAGE, ephemeral: true });
     return;
   }
 
   const status = interaction.values[0] as (typeof RECRUITMENT_STATUS_CHOICES)[number]["value"];
   await setStatus(ticketId, status);
-  await refreshRecruitmentLogMessage(interaction, ticketId);
+  await refreshRecruitmentLogMessage(interaction.client, ticketId);
 
-  await interaction.update({ content: `Statut mis a jour : **${recruitmentStatusLabel(status)}**`, components: [] });
+  if (status === "REJECTED") {
+    await closeTicketIfRejected(interaction, ticketId);
+  }
+
+  await interaction.update({ content: `Statut mis à jour : **${recruitmentStatusLabel(status)}**`, components: [] });
+}
+
+/**
+ * Marque le ticket comme clôturé côté suivi (statut CLOSED, arrête l'escalade et les stats
+ * "ouverts") quand une candidature passe à REFUSÉ, et poste un message dans le salon du
+ * ticket pour prevenir le staff qu'il peut le fermer via Ticket Tool. No-op si le ticket
+ * est deja ferme (evite un message en double si le statut est change plusieurs fois).
+ */
+async function closeTicketIfRejected(interaction: ButtonInteraction | StringSelectMenuInteraction, ticketId: string): Promise<void> {
+  const ticket = await getTicketById(ticketId);
+  if (!ticket || ticket.status !== "OPEN") return;
+
+  await markTicketClosed(ticket.channelId, ticket.guildId);
+
+  try {
+    const channel = await interaction.client.channels.fetch(ticket.channelId);
+    if (channel?.isTextBased() && !channel.isDMBased()) {
+      await channel.send(
+        "Cette candidature a été refusée : le ticket est marqué comme clôturé côté suivi. " +
+          "Le staff peut maintenant fermer ce salon via le bouton \"Close\" de Ticket Tool."
+      );
+    }
+  } catch (error) {
+    logger.error(`Echec notification de cloture pour le ticket ${ticketId}`, error);
+  }
 }
 
 /**
@@ -335,7 +295,7 @@ async function handleOrderSubmitItem(interaction: Interaction, catalogItemId: st
 
   const ticket = await getTicketByChannel(interaction.channelId);
   if (!ticket || ticket.type !== "SERVICE") {
-    await interaction.reply({ content: "Ce salon n'est pas rattache a une commande.", ephemeral: true });
+    await interaction.reply({ content: "Ce salon n'est pas rattaché à une commande.", ephemeral: true });
     return;
   }
 
@@ -372,7 +332,7 @@ async function handleOrderSubmitItem(interaction: Interaction, catalogItemId: st
   if (interaction.channel?.isTextBased() && !interaction.channel.isDMBased()) {
     await interaction.channel.send({ embeds: [embed], components: [row] });
   }
-  await interaction.reply({ content: "Article ajoute a la commande.", ephemeral: true });
+  await interaction.reply({ content: "Article ajouté à la commande.", ephemeral: true });
 }
 
 /**
@@ -416,7 +376,7 @@ async function handleOrderConfirm(interaction: Interaction): Promise<void> {
 
   const ticket = await getTicketByChannel(interaction.channelId);
   if (!ticket || ticket.type !== "SERVICE") {
-    await interaction.reply({ content: "Ce salon n'est pas rattache a une commande.", ephemeral: true });
+    await interaction.reply({ content: "Ce salon n'est pas rattaché à une commande.", ephemeral: true });
     return;
   }
 
@@ -431,18 +391,18 @@ async function handleOrderConfirm(interaction: Interaction): Promise<void> {
   const total = computeTotal(order);
 
   const embed = new EmbedBuilder()
-    .setTitle("Commande validee")
+    .setTitle("Commande validée")
     .setColor(0x57f287)
     .setDescription(order.items.map((i) => `**${i.name}** x${i.quantity} — ${(i.unitPrice * i.quantity).toLocaleString("fr-FR")} $`).join("\n"))
     .addFields({ name: "Total", value: `${total.toLocaleString("fr-FR")} $` });
 
   if (interaction.channel?.isTextBased() && !interaction.channel.isDMBased()) {
     await interaction.channel.send({
-      content: mentions ? `${mentions} Nouvelle commande a traiter.` : "Nouvelle commande a traiter.",
+      content: mentions ? `${mentions} Nouvelle commande à traiter.` : "Nouvelle commande à traiter.",
       embeds: [embed],
     });
   }
-  await interaction.reply({ content: "Commande validee, le staff a ete notifie.", ephemeral: true });
+  await interaction.reply({ content: "Commande validée, le staff a été notifié.", ephemeral: true });
 }
 
 /**

@@ -3,8 +3,9 @@ import { prisma } from "../db/prisma.js";
 
 /**
  * Service dedie au flux de recrutement : une `RecruitmentApplication` (1:1 avec un `Ticket`
- * de type RECRUITMENT) porte le statut du pipeline, le recruteur assigne, et ses reponses
- * au formulaire (`RecruitmentAnswer[]`).
+ * de type RECRUITMENT) porte le statut du pipeline, le recruteur assigne, ses reponses
+ * au formulaire (`RecruitmentAnswer[]`) et les pieces jointes envoyees par le candidat
+ * (`RecruitmentAttachment[]`).
  */
 
 /**
@@ -34,7 +35,7 @@ export async function saveAnswers(ticketId: string, answers: { question: string;
   return prisma.recruitmentApplication.update({
     where: { id: application.id },
     data: { submittedAt: new Date() },
-    include: { answers: true },
+    include: { answers: true, attachments: true },
   });
 }
 
@@ -56,10 +57,20 @@ export async function saveLogMessageRef(ticketId: string, logChannelId: string, 
   return prisma.recruitmentApplication.update({ where: { ticketId }, data: { logChannelId, logMessageId } });
 }
 
-/** Recupere la candidature d'un ticket avec ses reponses, ou `null` si aucune n'existe. */
+/**
+ * Rattache une piece jointe (image, document) envoyee par le candidat en message classique
+ * dans le salon du ticket — les modals Discord ne supportent pas l'upload de fichier, c'est
+ * donc le seul moyen technique de joindre des fichiers a une candidature.
+ */
+export async function addAttachment(ticketId: string, url: string, filename: string) {
+  const application = await prisma.recruitmentApplication.findUniqueOrThrow({ where: { ticketId } });
+  return prisma.recruitmentAttachment.create({ data: { applicationId: application.id, url, filename } });
+}
+
+/** Recupere la candidature d'un ticket avec ses reponses et pieces jointes, ou `null` si aucune n'existe. */
 export async function getApplication(ticketId: string) {
   return prisma.recruitmentApplication.findUnique({
     where: { ticketId },
-    include: { answers: true },
+    include: { answers: true, attachments: true },
   });
 }

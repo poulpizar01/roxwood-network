@@ -10,22 +10,22 @@ import { prisma } from "../db/prisma.js";
 export const autoreplyCommand: Command = {
   data: new SlashCommandBuilder()
     .setName("autoreply")
-    .setDescription("Gerer les regles de reponse automatique")
+    .setDescription("Gérer les règles de réponse automatique")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand((sub) =>
       sub
         .setName("add")
-        .setDescription("Ajouter une regle de reponse automatique")
-        .addStringOption((opt) => opt.setName("trigger").setDescription("Mot-cle declencheur").setRequired(true))
-        .addStringOption((opt) => opt.setName("response").setDescription("Reponse envoyee").setRequired(true))
+        .setDescription("Ajouter une règle de réponse automatique")
+        .addStringOption((opt) => opt.setName("trigger").setDescription("Mot-clé déclencheur").setRequired(true))
+        .addStringOption((opt) => opt.setName("response").setDescription("Réponse envoyée").setRequired(true))
     )
     .addSubcommand((sub) =>
       sub
         .setName("remove")
-        .setDescription("Supprimer une regle")
-        .addStringOption((opt) => opt.setName("id").setDescription("Identifiant de la regle").setRequired(true))
+        .setDescription("Supprimer une règle")
+        .addStringOption((opt) => opt.setName("id").setDescription("Identifiant de la règle").setRequired(true))
     )
-    .addSubcommand((sub) => sub.setName("list").setDescription("Lister les regles actives")) as SlashCommandBuilder,
+    .addSubcommand((sub) => sub.setName("list").setDescription("Lister les règles actives")) as SlashCommandBuilder,
 
   async execute(interaction) {
     if (!interaction.inGuild()) return;
@@ -37,21 +37,21 @@ export const autoreplyCommand: Command = {
       const rule = await prisma.autoReplyRule.create({
         data: { guildId: interaction.guildId, trigger, response },
       });
-      await interaction.reply({ content: `Regle creee (id: \`${rule.id}\`)`, ephemeral: true });
+      await interaction.reply({ content: `Règle créée (id: \`${rule.id}\`)`, ephemeral: true });
       return;
     }
 
     if (sub === "remove") {
       const id = interaction.options.getString("id", true);
       await prisma.autoReplyRule.deleteMany({ where: { id, guildId: interaction.guildId } });
-      await interaction.reply({ content: "Regle supprimee (si elle existait).", ephemeral: true });
+      await interaction.reply({ content: "Règle supprimée (si elle existait).", ephemeral: true });
       return;
     }
 
     if (sub === "list") {
       const rules = await prisma.autoReplyRule.findMany({ where: { guildId: interaction.guildId } });
       if (rules.length === 0) {
-        await interaction.reply({ content: "Aucune regle configuree.", ephemeral: true });
+        await interaction.reply({ content: "Aucune règle configurée.", ephemeral: true });
         return;
       }
       const lines = rules.map((r) => `\`${r.id}\` [${r.enabled ? "on" : "off"}] "${r.trigger}" -> "${r.response}"`);

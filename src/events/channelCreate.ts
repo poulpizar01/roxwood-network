@@ -23,7 +23,7 @@ async function postRecruitmentIntro(channel: NonThreadGuildBasedChannel): Promis
 
   const embed = new EmbedBuilder()
     .setTitle("Candidature")
-    .setDescription("Merci pour votre interet ! Cliquez sur le bouton ci-dessous pour remplir le formulaire de candidature.")
+    .setDescription("Merci pour votre intérêt ! Cliquez sur le bouton ci-dessous pour remplir le formulaire de candidature.")
     .setColor(0x5865f2);
 
   const button = new ButtonBuilder()
@@ -33,6 +33,21 @@ async function postRecruitmentIntro(channel: NonThreadGuildBasedChannel): Promis
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(button);
   await channel.send({ embeds: [embed], components: [row] });
+}
+
+/**
+ * Poste le message affiche a la place du formulaire quand les recrutements sont fermes
+ * (`GuildConfig.recruitmentOpen === false`, voir `/config set-recruitment-open`).
+ */
+async function postRecruitmentClosed(channel: NonThreadGuildBasedChannel): Promise<void> {
+  if (!channel.isTextBased()) return;
+
+  const embed = new EmbedBuilder()
+    .setTitle("Candidature")
+    .setDescription("Les recrutements sont actuellement fermés. Revenez plus tard, ou contactez le staff si besoin.")
+    .setColor(0xed4245);
+
+  await channel.send({ embeds: [embed] });
 }
 
 /**
@@ -46,7 +61,7 @@ async function postServiceIntro(channel: NonThreadGuildBasedChannel): Promise<vo
 
   const items = await listActive(channel.guildId);
   if (items.length === 0) {
-    await channel.send("Bienvenue ! Le catalogue n'est pas encore configure, un membre du staff va vous assister.");
+    await channel.send("Bienvenue ! Le catalogue n'est pas encore configuré, un membre du staff va vous assister.");
     return;
   }
 
@@ -94,7 +109,11 @@ export async function onChannelCreate(channel: NonThreadGuildBasedChannel): Prom
 
     if (type === "RECRUITMENT") {
       await createApplication(ticket.id);
-      await postRecruitmentIntro(channel);
+      if (config?.recruitmentOpen === false) {
+        await postRecruitmentClosed(channel);
+      } else {
+        await postRecruitmentIntro(channel);
+      }
     } else {
       await getOrCreateOrder(ticket.id);
       await postServiceIntro(channel);

@@ -44,7 +44,7 @@ async function checkStaleTickets(client: Client): Promise<void> {
 
         const mentions = config.staffRoleIds.map((roleId) => `<@&${roleId}>`).join(" ");
         if (mentions) {
-          await channel.send(`⚠️ Ticket sans reponse depuis plus de ${config.escalationMinutes} min. ${mentions}`);
+          await channel.send(`⚠️ Ticket sans réponse depuis plus de ${config.escalationMinutes} min. ${mentions}`);
         }
 
         await prisma.ticket.update({
