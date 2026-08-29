@@ -2,10 +2,11 @@ import { prisma } from "../db/prisma.js";
 
 /**
  * Ledger des mouvements de coffre d'entreprise (`MonitoringSafe`/`MonitoringSafeMovement`),
- * alimente par `monitoringService.ingestMonitoringMessage` sur les logs de type SAFE, et
- * interroge par la commande `/stock`. Le stock courant est toujours recalcule a la demande
- * (somme des mouvements), jamais stocke comme un compteur mutable — evite toute divergence
- * entre un compteur et son historique.
+ * alimente par `monitoringService.ingestMonitoringMessage` sur les logs de type SAFE. Pas de
+ * lecture cote Discord (l'ancienne commande `/stock` a ete retiree — accessible a tout membre
+ * du serveur sans role requis, jugee trop exposee pour une donnee d'entreprise) : le stock
+ * n'est aujourd'hui consultable que via le webhook sortant `monitoring.safe` (voir
+ * `webhookDispatcher.ts`), cote site externe.
  */
 
 /**

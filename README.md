@@ -58,10 +58,7 @@ Chaque message dédié (sauf le message racine) porte une réaction 🗑️ pos�
 
 - `/config set-panel-channel <channel>` — salon du panneau d'administration (voir ci-dessus).
 - `/absence` — déclare une absence (accessible à tout le monde, voir section Absences).
-- `/stock [coffre]` — consulte le stock d'un coffre d'entreprise, ou le stock total (accessible à tout le monde, voir section Monitoring).
 - `/stats overview` — tickets ouverts/fermés, temps de réponse moyen.
-
-`/catalog`, `/recruitment status` et `/autoreply` n'existent plus : entièrement remplacés par le panneau d'administration.
 
 ## Recrutement
 
@@ -105,14 +102,28 @@ Le script FiveM du serveur poste des logs d'activité en jeu (embeds webhook) da
 Effets automatiques :
 - **Prise de service** : bascule le rôle "en service" du membre concerné.
 - **Recrutement** (embauche uniquement) : si un ticket de candidature existe pour ce joueur (`Ticket.openerId` = `targetPlayerDiscord` du log), passe son statut à **Accepté** et met à jour le message de suivi. Licenciements et changements de grade sont journalisés mais sans effet automatique pour l'instant.
-- **Coffre** : chaque dépôt/retrait alimente un ledger par coffre (identifié par sa position), interrogeable avec `/stock`.
+- **Coffre** : chaque dépôt/retrait alimente un ledger par coffre (identifié par sa position) — consultable uniquement via le webhook sortant `monitoring.safe`, pas de commande Discord (voir plus bas pourquoi).
 - **Facture / Vente run** : journalisés pour les statistiques (montant, taxes, quantités) et relayés par webhook sortant — aucun effet automatique.
 
 Tout log reçu (que le texte libre de sa description ait pu être parsé ou non) est conservé en base (`MonitoringEvent`) et jamais perdu — un format de description inattendu désactive juste l'effet automatique correspondant (avertissement loggé), le reste continue de fonctionner.
 
-**Récupération des données côté site externe** : le bot ne fait que du push sortant — dès qu'un événement se produit, il envoie un `POST` au serveur du site, sans qu'aucun utilisateur ne soit connecté à ce moment-là (communication bot-vers-serveur, pas liée à une session). Le corps envoyé est `{ guildId, eventType, payload, sentAt }` : `guildId` identifie explicitement de quel serveur Discord provient l'événement, pour que le récepteur puisse trier même s'il reçoit les données de plusieurs Discords sur une seule URL. Distinguer les Discords entre eux (ne récupérer que les données d'un seul) se fait donc soit en filtrant sur ce `guildId`, soit en utilisant une URL dédiée par Discord lors de la création de l'abonnement (panneau "Monitoring" → "Ajouter un webhook"). L'authentification d'un visiteur humain sur le site (OAuth2 Discord) est un sujet complètement séparé, sans lien avec ce flux de données — voir la discussion dans l'historique du projet si besoin.
+### Sécurité des webhooks sortants
 
-**Sécurité des webhooks** : c'est du push sortant uniquement (aucun port/serveur exposé côté bot), et l'isolation entre serveurs Discord est garantie côté code — `dispatchWebhook` ne va chercher que les abonnements de la guilde concernée, jamais ceux d'un autre serveur. La signature HMAC-SHA256 permet au récepteur de vérifier l'authenticité des requêtes, mais **seulement s'il implémente lui-même cette vérification** — le bot ne peut pas l'y forcer (même principe que les webhooks Stripe/GitHub). Les actions sensibles du panneau "Monitoring" (jobId, rôle "en service", salons, webhooks sortants) exigent la permission Discord **"Gérer le serveur"**, en plus des permissions du salon panneau lui-même — contrairement au reste du panneau, qui ne s'appuie que sur la visibilité du salon.
+C'est du **push sortant uniquement** : le bot envoie un `POST` vers l'URL configurée dès qu'un événement se produit, sans qu'aucun utilisateur ne soit connecté à ce moment-là — communication bot-vers-serveur, aucun port/serveur exposé côté bot. Le corps envoyé est `{ guildId, eventType, payload, sentAt }` ; `guildId` identifie explicitement de quel serveur Discord provient l'événement (utile si le récepteur reçoit plusieurs Discords sur une seule URL). L'isolation entre serveurs Discord est garantie côté code : `dispatchWebhook` ne va chercher que les abonnements de la guilde concernée, jamais ceux d'un autre serveur.
+
+**Cette route n'est qu'un tuyau d'ingestion, jamais une route de lecture** : appeler cette URL directement (avec ou sans la bonne signature) ne renvoie jamais les données déjà stockées, elle ne fait qu'accepter (ou rejeter) ce qu'on lui envoie. Consulter les données doit se faire ailleurs, sur des pages du site protégées par une authentification à part (ex: OAuth2 Discord pour vérifier qui est connecté et quels rôles il a) — sans lien technique avec cette URL.
+
+**Vérification côté récepteur (obligatoire, pas automatique)** : chaque requête porte un header `X-Signature-256` = HMAC-SHA256 du corps brut, signé avec le secret propre à l'abonnement (généré et affiché **une seule fois** lors du clic sur "Ajouter un webhook" dans le panneau "Monitoring" — à copier immédiatement dans la config du site). Le bot ne peut pas forcer cette vérification, elle doit être implémentée côté site :
+1. Récupérer le corps brut de la requête (avant tout parsing JSON — un corps re-sérialisé peut ne plus correspondre octet pour octet).
+2. Recalculer HMAC-SHA256(secret, corps brut).
+3. Comparer au header `X-Signature-256` en temps constant (`crypto.timingSafeEqual` en Node, ou équivalent).
+4. Rejeter (401/403) si absent ou différent.
+
+Sans ça, n'importe qui connaissant l'URL peut injecter de fausses données (pas lire les vraies, voir plus haut) — même principe que les webhooks Stripe/GitHub.
+
+**Le secret doit rester côté serveur du site uniquement** (variable d'environnement, jamais dans du code envoyé au navigateur, jamais commité sur un dépôt public) — sinon n'importe quel visiteur du site pourrait le récupérer et signer de fausses requêtes lui-même. En cas de doute sur une fuite, retirer l'abonnement puis en recréer un (nouveau secret, l'ancien devient inutile).
+
+Les actions sensibles du panneau "Monitoring" (jobId, rôle "en service", salons, webhooks sortants) exigent la permission Discord **"Gérer le serveur"**, en plus des permissions du salon panneau lui-même — contrairement au reste du panneau, qui ne s'appuie que sur la visibilité du salon.
 
 ## Points d'extension
 

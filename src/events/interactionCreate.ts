@@ -1568,7 +1568,8 @@ async function handleMonitoringAddWebhookModal(interaction: Interaction, eventTy
   await interaction.reply({
     content:
       `Webhook \`${eventType}\` ajouté vers ${url}.\n` +
-      `Secret de signature (header \`X-Signature-256\`, HMAC-SHA256) — **note-le, il ne sera plus jamais affiché** :\n\`${secret}\``,
+      `Secret de signature (header \`X-Signature-256\`, HMAC-SHA256) — **note-le, il ne sera plus jamais affiché** :\n\`${secret}\`\n\n` +
+      "⚠️ Ce secret doit rester **côté serveur uniquement** (variable d'environnement du site, jamais dans du code envoyé au navigateur, jamais commité sur un dépôt public) — sinon n'importe quel visiteur du site pourrait le récupérer.",
     ephemeral: true,
   });
 }
