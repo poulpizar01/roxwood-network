@@ -1,6 +1,6 @@
 import { PermissionFlagsBits, SlashCommandBuilder, ChannelType } from "discord.js";
 import type { Command } from "./types.js";
-import { setEscalationMinutes, setRecruitmentLogChannel, setPanelChannel } from "../services/guildConfigService.js";
+import { setEscalationMinutes, setPanelChannel } from "../services/guildConfigService.js";
 import { refreshRootPanelMessage } from "../services/panelService.js";
 
 /**
@@ -38,18 +38,6 @@ export const configCommand: Command = {
             .setMinValue(0)
             .setRequired(true)
         )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("set-recruitment-channel")
-        .setDescription("Salon où poster le suivi des candidatures (récap + boutons Statut/S'assigner)")
-        .addChannelOption((opt) =>
-          opt
-            .setName("channel")
-            .setDescription("Salon de suivi (laisser vide pour revenir au salon du ticket)")
-            .addChannelTypes(ChannelType.GuildText)
-            .setRequired(false)
-        )
     ) as SlashCommandBuilder,
 
   async execute(interaction) {
@@ -71,18 +59,6 @@ export const configCommand: Command = {
       await setEscalationMinutes(interaction.guildId, minutes === 0 ? null : minutes);
       await interaction.reply({
         content: minutes === 0 ? "Escalade désactivée." : `Escalade fixée à ${minutes} min sans réponse staff.`,
-        ephemeral: true,
-      });
-      return;
-    }
-
-    if (sub === "set-recruitment-channel") {
-      const channel = interaction.options.getChannel("channel");
-      await setRecruitmentLogChannel(interaction.guildId, channel?.id ?? null);
-      await interaction.reply({
-        content: channel
-          ? `Suivi des candidatures posté désormais dans <#${channel.id}>.`
-          : "Suivi des candidatures repostera dans le salon de chaque ticket.",
         ephemeral: true,
       });
     }

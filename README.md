@@ -47,7 +47,7 @@ Aucun port n'est exposé publiquement (le bot ne fait que des connexions sortant
 
 - **Tickets** : gestion des rôles de gestion par catégorie de ticket ("Ajouter/Retirer un rôle de gestion" — chaque catégorie a sa propre équipe, plus de rôle staff global unique), plus trois boutons qui ouvrent les messages dédiés imbriqués **Service client**, **Recrutement** et **FAQ** (dans le même salon).
 - **Service client** : bouton "Définir/Retirer la catégorie" (libellé selon l'état courant), puis gestion du catalogue — ajouter/retirer un article, changer sa photo (envoyée en message juste après, les modals Discord ne supportent pas l'upload de fichier), ajouter/retirer un champ personnalisé par article.
-- **Recrutement** : bouton "Définir/Retirer la catégorie", bouton "Ouvrir/Fermer les recrutements" (même principe, libellé dynamique), et gestion des questions du formulaire de candidature (max 5, style texte court/long) — si aucune n'est configurée, repli automatique sur 5 questions par défaut (Nom RP, Âge, Expérience RP, Disponibilités, Motivation).
+- **Recrutement** : bouton "Définir/Retirer la catégorie", bouton "Ouvrir/Fermer les recrutements" (même principe, libellé dynamique), bouton "Définir/Retirer le salon de suivi" des candidatures (même principe — "Retirer" revient au comportement par défaut : récap posté dans le salon du ticket), et gestion des questions du formulaire de candidature (max 5, style texte court/long) — si aucune n'est configurée, repli automatique sur 5 questions par défaut (Nom RP, Âge, Expérience RP, Disponibilités, Motivation).
 - **FAQ** : bouton "Définir/Retirer la catégorie" (comme Service client/Recrutement), puis gestion des règles de réponse automatique mot-clé -> réponse.
 - **Absences** : configuration du rôle approbateur et du salon de suivi des demandes (voir section Absences plus bas).
 - **Monitoring** : lecture des logs webhook du script FiveM (voir section Monitoring plus bas).
@@ -58,7 +58,6 @@ Chaque message dédié (sauf le message racine) porte une réaction 🗑️ pos�
 
 - `/config set-panel-channel <channel>` — salon du panneau d'administration (voir ci-dessus).
 - `/config set-escalation-timeout <minutes>` — délai avant qu'un ticket sans réponse staff déclenche une escalade (0 = désactivé).
-- `/config set-recruitment-channel [channel]` — salon dédié où poster le suivi des candidatures (récap + boutons), pour ne pas encombrer le salon du ticket partagé avec le candidat. Sans salon configuré, le récap est posté dans le salon du ticket lui-même.
 - `/absence` — déclare une absence (accessible à tout le monde, voir section Absences).
 - `/stock [coffre]` — consulte le stock d'un coffre d'entreprise, ou le stock total (accessible à tout le monde, voir section Monitoring).
 - `/ticket info` / `/ticket priority <level>` / `/ticket tag add|remove <tag>`.
@@ -70,7 +69,7 @@ Chaque message dédié (sauf le message racine) porte une réaction 🗑️ pos�
 
 À l'ouverture d'un ticket dans la catégorie Recrutement (et si les recrutements sont ouverts, voir panneau "Recrutement"), le bot poste un bouton "Remplir le formulaire" qui ouvre un modal Discord avec les questions configurées (ou les 5 par défaut). À la soumission, le candidat reçoit une confirmation qui l'invite aussi à envoyer d'éventuelles photos/documents **directement en message** dans le salon : le bot les rattache automatiquement à la candidature.
 
-Un récap (candidat, statut, recruteur, réponses, pièces jointes) est posté dans le salon de suivi (`/config set-recruitment-channel`, ou le salon du ticket par défaut) avec deux boutons :
+Un récap (candidat, statut, recruteur, réponses, pièces jointes) est posté dans le salon de suivi (panneau "Recrutement" → "Définir le salon de suivi", ou le salon du ticket par défaut) avec deux boutons :
 
 - **Statut** — ouvre un menu déroulant éphémère (En attente / Entretien / Accepté / Refusé) ; le message de suivi se met à jour automatiquement. Passer une candidature à **Refusé** marque aussi le ticket comme clôturé côté suivi (arrête l'escalade, sort des stats "ouverts") et prévient le staff dans le salon qu'il peut le fermer via le bouton "Close" de Ticket Tool. La fermeture automatisée a été testée (message direct du bot, puis via webhook de salon) et abandonnée : Ticket Tool ignore tout message qui ne vient pas d'un vrai humain, et un bot ne peut de toute façon pas cliquer le bouton d'un autre bot à sa place (limite Discord). C'est pour ça que le bot ne supprime jamais les messages d'un autre bot qui portent un bouton/menu (voir plus bas) : celui de Ticket Tool doit rester cliquable.
 - **S'assigner** — assigne directement le membre du staff qui clique comme recruteur (réassignation possible).

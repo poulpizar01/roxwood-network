@@ -56,6 +56,7 @@ import {
   setMonitoringChannel,
   setMonitoringJobId,
   setOnDutyRole,
+  setRecruitmentLogChannel,
   setRecruitmentOpen,
 } from "../services/guildConfigService.js";
 import {
@@ -1220,6 +1221,36 @@ async function handlePanelRecruitmentToggle(interaction: Interaction): Promise<v
   });
 }
 
+/** Clic sur "Définir le salon de suivi" : menu natif Discord filtre aux salons textuels. */
+async function handlePanelRecruitmentSetLogChannel(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton()) return;
+
+  const select = new ChannelSelectMenuBuilder()
+    .setCustomId("panel:recruitment:set-log-channel-select")
+    .setPlaceholder("Choisir un salon")
+    .addChannelTypes(ChannelType.GuildText);
+  const row = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(select);
+  await interaction.reply({ components: [row], ephemeral: true });
+}
+
+async function handleRecruitmentSetLogChannelSelect(interaction: Interaction): Promise<void> {
+  if (!interaction.isChannelSelectMenu() || !interaction.guildId || !interaction.channelId) return;
+
+  const channelId = interaction.values[0];
+  await setRecruitmentLogChannel(interaction.guildId, channelId);
+  await refreshRecruitmentPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.update({ content: `Salon de suivi défini sur <#${channelId}>.`, components: [] });
+}
+
+/** Clic sur "Retirer le salon de suivi" : revient au comportement par defaut (recap poste dans le salon du ticket). */
+async function handlePanelRecruitmentClearLogChannel(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId || !interaction.channelId) return;
+
+  await setRecruitmentLogChannel(interaction.guildId, null);
+  await refreshRecruitmentPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.reply({ content: "Salon de suivi retiré, le récap sera posté dans le salon de chaque ticket.", ephemeral: true });
+}
+
 /** Clic sur "Ajouter une question" : d'abord choisir le type de champ (court/long). */
 async function handlePanelRecruitmentAddQuestion(interaction: Interaction): Promise<void> {
   if (!interaction.isButton()) return;
@@ -1583,6 +1614,8 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:recruitment:set-category") return await handlePanelRecruitmentSetCategory(interaction);
       if (interaction.customId === "panel:recruitment:clear-category") return await handlePanelRecruitmentClearCategory(interaction);
       if (interaction.customId === "panel:recruitment:toggle") return await handlePanelRecruitmentToggle(interaction);
+      if (interaction.customId === "panel:recruitment:set-log-channel") return await handlePanelRecruitmentSetLogChannel(interaction);
+      if (interaction.customId === "panel:recruitment:clear-log-channel") return await handlePanelRecruitmentClearLogChannel(interaction);
       if (interaction.customId === "panel:recruitment:add-question") return await handlePanelRecruitmentAddQuestion(interaction);
       if (interaction.customId === "panel:recruitment:remove-question") return await handlePanelRecruitmentRemoveQuestion(interaction);
       if (interaction.customId === "panel:faq:set-category") return await handlePanelFaqSetCategory(interaction);
@@ -1611,6 +1644,7 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
     if (interaction.isChannelSelectMenu()) {
       if (interaction.customId === "panel:service:set-category-select") return await handleServiceSetCategorySelect(interaction);
       if (interaction.customId === "panel:recruitment:set-category-select") return await handleRecruitmentSetCategorySelect(interaction);
+      if (interaction.customId === "panel:recruitment:set-log-channel-select") return await handleRecruitmentSetLogChannelSelect(interaction);
       if (interaction.customId === "panel:faq:set-category-select") return await handleFaqSetCategorySelect(interaction);
       if (interaction.customId === "panel:absences:set-review-channel-select") return await handlePanelAbsencesSetReviewChannelSelect(interaction);
       if (interaction.customId.startsWith("panel:monitoring:set-channel-select:")) {

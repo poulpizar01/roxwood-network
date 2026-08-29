@@ -254,9 +254,10 @@ export function buildServicePanelRows(categoryId: string | null): ActionRowBuild
 }
 
 /**
- * Embed du message dedie "Recrutement" : categorie mappee, etat (ouvert/ferme) et questions
- * du formulaire (configurees par le staff, ou les 5 questions par defaut si aucune n'est
- * configuree). Remplace entierement `/recruitment status`.
+ * Embed du message dedie "Recrutement" : categorie mappee, etat (ouvert/ferme), salon de suivi
+ * des candidatures et questions du formulaire (configurees par le staff, ou les 5 questions
+ * par defaut si aucune n'est configuree). Remplace entierement `/recruitment status` et
+ * `/config set-recruitment-channel`.
  */
 export async function buildRecruitmentPanelEmbed(guildId: string): Promise<EmbedBuilder> {
   const config = await getGuildConfig(guildId);
@@ -275,15 +276,21 @@ export async function buildRecruitmentPanelEmbed(guildId: string): Promise<Embed
     .addFields(
       { name: "Catégorie", value: category ? `<#${category.categoryId}>` : "Non configurée" },
       { name: "État", value: open ? "**Ouvert**" : "**Fermé**" },
+      {
+        name: "Salon de suivi des candidatures",
+        value: config?.recruitmentLogChannelId ? `<#${config.recruitmentLogChannelId}>` : "Salon du ticket (par défaut)",
+      },
       { name: "Questions du formulaire", value: questionsText }
     );
 }
 
 /**
  * Boutons du message dedie "Recrutement" : categorie (bouton unique Definir/Retirer selon
- * l'etat courant), bascule ouvert/ferme (meme principe), et gestion des questions du formulaire.
+ * l'etat courant), bascule ouvert/ferme (meme principe), salon de suivi (meme principe —
+ * "Retirer" revient au comportement par defaut : recap poste dans le salon du ticket), et
+ * gestion des questions du formulaire.
  */
-export function buildRecruitmentPanelRows(open: boolean, categoryId: string | null): ActionRowBuilder<ButtonBuilder>[] {
+export function buildRecruitmentPanelRows(open: boolean, categoryId: string | null, logChannelId: string | null): ActionRowBuilder<ButtonBuilder>[] {
   const categoryRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(categoryId ? "panel:recruitment:clear-category" : "panel:recruitment:set-category")
@@ -296,11 +303,17 @@ export function buildRecruitmentPanelRows(open: boolean, categoryId: string | nu
       .setLabel(open ? "Fermer les recrutements" : "Ouvrir les recrutements")
       .setStyle(open ? ButtonStyle.Danger : ButtonStyle.Success)
   );
+  const logChannelRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(logChannelId ? "panel:recruitment:clear-log-channel" : "panel:recruitment:set-log-channel")
+      .setLabel(logChannelId ? "Retirer le salon de suivi" : "Définir le salon de suivi")
+      .setStyle(logChannelId ? ButtonStyle.Danger : ButtonStyle.Success)
+  );
   const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("panel:recruitment:add-question").setLabel("Ajouter une question").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("panel:recruitment:remove-question").setLabel("Retirer une question").setStyle(ButtonStyle.Danger)
   );
-  return [categoryRow, row1, row2];
+  return [categoryRow, row1, logChannelRow, row2];
 }
 
 /**
@@ -451,7 +464,7 @@ export async function refreshRecruitmentPanelMessage(client: Client, guildId: st
   const categoryId = config?.ticketCategories.find((c) => c.type === "RECRUITMENT")?.categoryId ?? null;
   await upsertPanelMessage(client, guildId, "RECRUITMENT", channelId, {
     embeds: [await buildRecruitmentPanelEmbed(guildId)],
-    components: buildRecruitmentPanelRows(config?.recruitmentOpen ?? true, categoryId),
+    components: buildRecruitmentPanelRows(config?.recruitmentOpen ?? true, categoryId, config?.recruitmentLogChannelId ?? null),
   });
 }
 
