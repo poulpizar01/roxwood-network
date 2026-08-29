@@ -1,5 +1,5 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Client } from "discord.js";
-import type { MonitoringLogType, PanelMessageKey } from "@prisma/client";
+import type { MonitoringLogType, PanelMessageKey, TicketType } from "@prisma/client";
 import { prisma } from "../db/prisma.js";
 import { getGuildConfig } from "./guildConfigService.js";
 import { listActiveWithFields } from "./catalogService.js";
@@ -93,6 +93,13 @@ export async function upsertPanelMessage(
   await saveMessageRef(guildId, key, message.id);
 }
 
+/** Libelle affichable de chaque type de ticket (boutons, embeds, menus). */
+export const TICKET_TYPE_LABELS: Record<TicketType, string> = {
+  RECRUITMENT: "Recrutement",
+  SERVICE: "Service client",
+  FAQ: "FAQ",
+};
+
 /** Embed du message racine du panneau : point d'entree vers chaque fonctionnalite. */
 export function buildRootPanelEmbed(): EmbedBuilder {
   return new EmbedBuilder()
@@ -101,18 +108,17 @@ export function buildRootPanelEmbed(): EmbedBuilder {
     .setColor(0x5865f2);
 }
 
-/** Boutons du message racine : un par fonctionnalite de premier niveau. */
+/** Boutons du message racine : un par fonctionnalite de premier niveau. FAQ est desormais nichee sous "Tickets" (voir buildTicketsPanelRows) — c'est une categorie de ticket comme Service client/Recrutement, plus une entree racine independante. */
 export function buildRootPanelRow(): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("panel:root:tickets").setLabel("Tickets").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("panel:root:absences").setLabel("Absences").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("panel:root:faq").setLabel("FAQ").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("panel:root:monitoring").setLabel("Monitoring").setStyle(ButtonStyle.Primary)
   );
 }
 
 /**
- * Embed du message dedie "Tickets" : recapitule, pour chacun des deux types (une seule
+ * Embed du message dedie "Tickets" : recapitule, pour chacun des trois types (une seule
  * categorie possible par type — pas de sens metier a en avoir plusieurs), la categorie
  * mappee et ses roles de gestion. Utilise les mentions Discord (`<#id>`/`<@&id>`) pour
  * afficher noms de categorie/role sans avoir a les resoudre via l'API.
@@ -121,7 +127,7 @@ export async function buildTicketsPanelEmbed(guildId: string): Promise<EmbedBuil
   const config = await getGuildConfig(guildId);
   const categories = config?.ticketCategories ?? [];
 
-  const describe = (type: "RECRUITMENT" | "SERVICE") => {
+  const describe = (type: TicketType) => {
     const category = categories.find((c) => c.type === type);
     if (!category) return "Non configurée";
     const roles = category.managerRoleIds.length ? category.managerRoleIds.map((r) => `<@&${r}>`).join(" ") : "aucun rôle";
@@ -133,15 +139,16 @@ export async function buildTicketsPanelEmbed(guildId: string): Promise<EmbedBuil
     .setColor(0x5865f2)
     .addFields(
       { name: "Recrutement", value: describe("RECRUITMENT"), inline: true },
-      { name: "Service client", value: describe("SERVICE"), inline: true }
+      { name: "Service client", value: describe("SERVICE"), inline: true },
+      { name: "FAQ", value: describe("FAQ"), inline: true }
     );
 }
 
 /**
  * Boutons du message dedie "Tickets" : gestion des roles (la categorie de chaque type se
- * definit desormais directement depuis les messages "Service client"/"Recrutement", via un
- * bouton Definir/Retirer la categorie — meme principe que le bouton ouvrir/fermer les
- * recrutements), plus deux boutons qui ouvrent ces messages dedies imbriques.
+ * definit desormais directement depuis les messages "Service client"/"Recrutement"/"FAQ", via
+ * un bouton Definir/Retirer la categorie — meme principe que le bouton ouvrir/fermer les
+ * recrutements), plus trois boutons qui ouvrent ces messages dedies imbriques.
  */
 export function buildTicketsPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
   const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -150,7 +157,8 @@ export function buildTicketsPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
   );
   const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("panel:tickets:service").setLabel("Service client").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("panel:tickets:recruitment").setLabel("Recrutement").setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId("panel:tickets:recruitment").setLabel("Recrutement").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("panel:tickets:faq").setLabel("FAQ").setStyle(ButtonStyle.Secondary)
   );
   return [row1, row2];
 }
@@ -296,30 +304,44 @@ export function buildRecruitmentPanelRows(open: boolean, categoryId: string | nu
 }
 
 /**
- * Embed du message dedie "FAQ" : recapitule les regles de reponse automatique par mot-cle
- * (declenchees quand le client ouvrant un ticket ecrit un message qui contient le mot-cle).
- * Remplace entierement `/autoreply`.
+ * Embed du message dedie "FAQ" : categorie mappee (FAQ est une categorie de ticket comme
+ * Service client/Recrutement — un client ouvre un ticket FAQ pour poser une question) et
+ * regles de reponse automatique par mot-cle, declenchees uniquement dans les tickets FAQ
+ * (voir `messageCreate.ts`). Remplace entierement `/autoreply`.
  */
 export async function buildFaqPanelEmbed(guildId: string): Promise<EmbedBuilder> {
+  const config = await getGuildConfig(guildId);
+  const category = config?.ticketCategories.find((c) => c.type === "FAQ");
   const rules = await listRules(guildId);
-  const embed = new EmbedBuilder().setTitle("FAQ").setColor(0x5865f2);
 
-  if (rules.length === 0) {
-    embed.setDescription("Aucune règle configurée.");
-  } else {
-    embed.setDescription(rules.slice(0, 25).map((r) => `**${r.trigger}** → ${r.response}`).join("\n\n"));
-  }
+  const embed = new EmbedBuilder()
+    .setTitle("FAQ")
+    .setColor(0x5865f2)
+    .addFields({ name: "Catégorie", value: category ? `<#${category.categoryId}>` : "Non configurée" });
+
+  embed.setDescription(
+    rules.length === 0 ? "Aucune règle configurée." : rules.slice(0, 25).map((r) => `**${r.trigger}** → ${r.response}`).join("\n\n")
+  );
 
   return embed;
 }
 
-/** Boutons du message dedie "FAQ" : gestion des regles mot-cle -> reponse. */
-export function buildFaqPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
+/**
+ * Boutons du message dedie "FAQ" : categorie (bouton unique Definir/Retirer selon l'etat
+ * courant — meme principe que Service client/Recrutement), puis gestion des regles.
+ */
+export function buildFaqPanelRows(categoryId: string | null): ActionRowBuilder<ButtonBuilder>[] {
+  const categoryRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(categoryId ? "panel:faq:clear-category" : "panel:faq:set-category")
+      .setLabel(categoryId ? "Retirer la catégorie" : "Définir la catégorie")
+      .setStyle(categoryId ? ButtonStyle.Danger : ButtonStyle.Success)
+  );
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("panel:faq:add-rule").setLabel("Ajouter une règle").setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId("panel:faq:remove-rule").setLabel("Retirer une règle").setStyle(ButtonStyle.Danger)
   );
-  return [row];
+  return [categoryRow, row];
 }
 
 /** Libelle affichable de chaque type de log de monitoring (boutons, embeds, menus). */
@@ -441,9 +463,11 @@ export async function refreshAbsencesPanelMessage(client: Client, guildId: strin
 }
 
 export async function refreshFaqPanelMessage(client: Client, guildId: string, channelId: string): Promise<void> {
+  const config = await getGuildConfig(guildId);
+  const categoryId = config?.ticketCategories.find((c) => c.type === "FAQ")?.categoryId ?? null;
   await upsertPanelMessage(client, guildId, "FAQ", channelId, {
     embeds: [await buildFaqPanelEmbed(guildId)],
-    components: buildFaqPanelRows(),
+    components: buildFaqPanelRows(categoryId),
   });
 }
 

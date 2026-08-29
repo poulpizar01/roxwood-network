@@ -87,6 +87,23 @@ async function postServiceIntro(channel: NonThreadGuildBasedChannel): Promise<vo
 }
 
 /**
+ * Poste le message d'accueil d'un ticket FAQ : explique que le client peut poser sa question
+ * directement, et qu'une reponse automatique se declenche si un mot-cle configure (panneau
+ * "Tickets" -> "FAQ") est detecte (voir `messageCreate.ts`). Aucun modele dedie contrairement
+ * a Recrutement/Service : la FAQ n'a besoin que du type de ticket pour scoper `findAutoReply`.
+ */
+async function postFaqIntro(channel: NonThreadGuildBasedChannel): Promise<void> {
+  if (!channel.isTextBased()) return;
+
+  const embed = new EmbedBuilder()
+    .setTitle("FAQ")
+    .setDescription("Posez votre question ci-dessous. Si elle correspond à une question fréquente, vous recevrez une réponse automatique — sinon, un membre du staff vous répondra.")
+    .setColor(0x5865f2);
+
+  await channel.send({ embeds: [embed] });
+}
+
+/**
  * Handler de l'evenement `channelCreate` : coeur de la detection de ticket puisque
  * Ticket Tool n'a pas d'API. Ignore tout canal qui n'est ni un salon texte, ni situe
  * dans une categorie mappee a un type de ticket (`getCategoryType`) — c'est ce qui
@@ -94,7 +111,8 @@ async function postServiceIntro(channel: NonThreadGuildBasedChannel): Promise<vo
  * "Article") geres par Ticket Tool seul, hors de son perimetre.
  *
  * Une fois le ticket detecte et enregistre (`trackTicketChannel`), cree l'enregistrement
- * specifique au type (candidature ou commande) et poste le message d'accueil correspondant.
+ * specifique au type (candidature ou commande — la FAQ n'en a pas besoin) et poste le
+ * message d'accueil correspondant.
  */
 export async function onChannelCreate(channel: NonThreadGuildBasedChannel): Promise<void> {
   if (channel.type !== ChannelType.GuildText) return;
@@ -114,9 +132,11 @@ export async function onChannelCreate(channel: NonThreadGuildBasedChannel): Prom
       } else {
         await postRecruitmentIntro(channel);
       }
-    } else {
+    } else if (type === "SERVICE") {
       await getOrCreateOrder(ticket.id);
       await postServiceIntro(channel);
+    } else {
+      await postFaqIntro(channel);
     }
   } catch (error) {
     logger.error(`Erreur lors du suivi du nouveau canal ${channel.id}`, error);

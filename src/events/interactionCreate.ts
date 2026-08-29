@@ -67,6 +67,7 @@ import {
 import { addRule as addFaqRule, listRules as listFaqRules, removeRule as removeFaqRule } from "../services/autoReplyService.js";
 import {
   MONITORING_TYPE_LABELS,
+  TICKET_TYPE_LABELS,
   refreshAbsencesPanelMessage,
   refreshFaqPanelMessage,
   refreshMonitoringPanelMessage,
@@ -646,7 +647,7 @@ async function handleOrderRemoveItemSelect(interaction: Interaction, ticketId: s
  * la Phase A ne pose qu'un message minimal ("bientot disponible") — leur contenu complet
  * (declaration d'absence, gestion FAQ) arrive dans une phase ulterieure.
  */
-async function handlePanelRootButton(interaction: Interaction, key: "TICKETS" | "ABSENCES" | "FAQ" | "MONITORING"): Promise<void> {
+async function handlePanelRootButton(interaction: Interaction, key: "TICKETS" | "ABSENCES" | "MONITORING"): Promise<void> {
   if (!interaction.isButton() || !interaction.guildId || !interaction.channelId) return;
 
   await setPanelEnabled(interaction.guildId, key, true);
@@ -655,8 +656,6 @@ async function handlePanelRootButton(interaction: Interaction, key: "TICKETS" | 
     await refreshTicketsPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
   } else if (key === "ABSENCES") {
     await refreshAbsencesPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
-  } else if (key === "FAQ") {
-    await refreshFaqPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
   } else {
     await refreshMonitoringPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
   }
@@ -664,8 +663,13 @@ async function handlePanelRootButton(interaction: Interaction, key: "TICKETS" | 
   await interaction.reply({ content: "Fonctionnalité activée, voir le message ci-dessus.", ephemeral: true });
 }
 
-/** Clic sur "Service client"/"Recrutement" dans le message dedie "Tickets" : messages dedies imbriques (Phase A : placeholder). */
-async function handlePanelTicketsNested(interaction: Interaction, key: "SERVICE" | "RECRUITMENT"): Promise<void> {
+/**
+ * Clic sur "Service client"/"Recrutement"/"FAQ" dans le message dedie "Tickets" : ouvre le
+ * message dedie imbrique correspondant — FAQ est desormais une categorie de ticket comme
+ * les deux autres (un client ouvre un ticket FAQ pour poser une question), plus une simple
+ * config de reponses automatiques valable partout.
+ */
+async function handlePanelTicketsNested(interaction: Interaction, key: "SERVICE" | "RECRUITMENT" | "FAQ"): Promise<void> {
   if (!interaction.isButton() || !interaction.guildId || !interaction.channelId) return;
 
   await setPanelEnabled(interaction.guildId, key, true);
@@ -676,8 +680,14 @@ async function handlePanelTicketsNested(interaction: Interaction, key: "SERVICE"
     return;
   }
 
-  await refreshRecruitmentPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
-  await interaction.reply({ content: "Recrutement activé, voir le message ci-dessus.", ephemeral: true });
+  if (key === "RECRUITMENT") {
+    await refreshRecruitmentPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+    await interaction.reply({ content: "Recrutement activé, voir le message ci-dessus.", ephemeral: true });
+    return;
+  }
+
+  await refreshFaqPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.reply({ content: "FAQ activée, voir le message ci-dessus.", ephemeral: true });
 }
 
 /**
@@ -691,7 +701,7 @@ async function handlePanelTicketsAddRole(interaction: Interaction): Promise<void
   const config = await getGuildConfig(interaction.guildId);
   const categories = config?.ticketCategories ?? [];
   if (categories.length === 0) {
-    await interaction.reply({ content: "Aucune catégorie configurée, configurez Recrutement ou Service client d'abord.", ephemeral: true });
+    await interaction.reply({ content: "Aucune catégorie configurée, configurez Recrutement, Service client ou FAQ d'abord.", ephemeral: true });
     return;
   }
 
@@ -700,7 +710,7 @@ async function handlePanelTicketsAddRole(interaction: Interaction): Promise<void
     .setPlaceholder("Choisir un type")
     .addOptions(
       categories.map((c) => ({
-        label: c.type === "RECRUITMENT" ? "Recrutement" : "Service client",
+        label: TICKET_TYPE_LABELS[c.type],
         value: c.categoryId,
       }))
     );
@@ -746,7 +756,7 @@ async function handlePanelTicketsRemoveRole(interaction: Interaction): Promise<v
     .setPlaceholder("Choisir un type")
     .addOptions(
       categories.map((c) => ({
-        label: c.type === "RECRUITMENT" ? "Recrutement" : "Service client",
+        label: TICKET_TYPE_LABELS[c.type],
         value: c.categoryId,
       }))
     );
@@ -1278,6 +1288,35 @@ async function handleRecruitmentRemoveQuestionSelect(interaction: Interaction): 
   await interaction.update({ content: "Question retirée.", components: [] });
 }
 
+/** Clic sur "Définir la catégorie" (FAQ) : menu natif Discord pour choisir la catégorie. */
+async function handlePanelFaqSetCategory(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton()) return;
+
+  const select = new ChannelSelectMenuBuilder()
+    .setCustomId("panel:faq:set-category-select")
+    .setPlaceholder("Choisir une catégorie")
+    .addChannelTypes(ChannelType.GuildCategory);
+  const row = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(select);
+  await interaction.reply({ components: [row], ephemeral: true });
+}
+
+async function handleFaqSetCategorySelect(interaction: Interaction): Promise<void> {
+  if (!interaction.isChannelSelectMenu() || !interaction.guildId || !interaction.channelId) return;
+
+  const categoryId = interaction.values[0];
+  await setCategoryForType(interaction.guildId, "FAQ", categoryId);
+  await refreshFaqPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.update({ content: `Catégorie définie sur <#${categoryId}>.`, components: [] });
+}
+
+/** Clic sur "Retirer la catégorie" (FAQ) : retire directement, un seul mapping possible par type. */
+async function handlePanelFaqClearCategory(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId || !interaction.channelId) return;
+
+  await clearCategoryForType(interaction.guildId, "FAQ");
+  await refreshFaqPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.reply({ content: "Catégorie retirée.", ephemeral: true });
+}
 
 /** Clic sur "Ajouter une règle" : modal (mot-clé, réponse). */
 async function handlePanelFaqAddRule(interaction: Interaction): Promise<void> {
@@ -1520,10 +1559,10 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       }
       if (interaction.customId === "panel:root:tickets") return await handlePanelRootButton(interaction, "TICKETS");
       if (interaction.customId === "panel:root:absences") return await handlePanelRootButton(interaction, "ABSENCES");
-      if (interaction.customId === "panel:root:faq") return await handlePanelRootButton(interaction, "FAQ");
       if (interaction.customId === "panel:root:monitoring") return await handlePanelRootButton(interaction, "MONITORING");
       if (interaction.customId === "panel:tickets:service") return await handlePanelTicketsNested(interaction, "SERVICE");
       if (interaction.customId === "panel:tickets:recruitment") return await handlePanelTicketsNested(interaction, "RECRUITMENT");
+      if (interaction.customId === "panel:tickets:faq") return await handlePanelTicketsNested(interaction, "FAQ");
       if (interaction.customId === "panel:tickets:add-role") return await handlePanelTicketsAddRole(interaction);
       if (interaction.customId === "panel:tickets:remove-role") return await handlePanelTicketsRemoveRole(interaction);
       if (interaction.customId === "panel:absences:set-approver-role") return await handlePanelAbsencesSetApproverRole(interaction);
@@ -1546,6 +1585,8 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:recruitment:toggle") return await handlePanelRecruitmentToggle(interaction);
       if (interaction.customId === "panel:recruitment:add-question") return await handlePanelRecruitmentAddQuestion(interaction);
       if (interaction.customId === "panel:recruitment:remove-question") return await handlePanelRecruitmentRemoveQuestion(interaction);
+      if (interaction.customId === "panel:faq:set-category") return await handlePanelFaqSetCategory(interaction);
+      if (interaction.customId === "panel:faq:clear-category") return await handlePanelFaqClearCategory(interaction);
       if (interaction.customId === "panel:faq:add-rule") return await handlePanelFaqAddRule(interaction);
       if (interaction.customId === "panel:faq:remove-rule") return await handlePanelFaqRemoveRule(interaction);
       if (interaction.customId === "panel:monitoring:set-job-id") return await handlePanelMonitoringSetJobId(interaction);
@@ -1570,6 +1611,7 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
     if (interaction.isChannelSelectMenu()) {
       if (interaction.customId === "panel:service:set-category-select") return await handleServiceSetCategorySelect(interaction);
       if (interaction.customId === "panel:recruitment:set-category-select") return await handleRecruitmentSetCategorySelect(interaction);
+      if (interaction.customId === "panel:faq:set-category-select") return await handleFaqSetCategorySelect(interaction);
       if (interaction.customId === "panel:absences:set-review-channel-select") return await handlePanelAbsencesSetReviewChannelSelect(interaction);
       if (interaction.customId.startsWith("panel:monitoring:set-channel-select:")) {
         return await handleMonitoringSetChannelSelect(

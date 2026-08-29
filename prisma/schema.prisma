@@ -81,6 +81,9 @@ enum TicketType {
   RECRUITMENT
   /// Commande : catalogue + composition self-service par le client (voir ServiceOrder).
   SERVICE
+  /// Question generale : reponse automatique par mot-cle (voir AutoReplyRule), pas de modele
+  /// dedie — juste un scope pour ne declencher `findAutoReply` que dans ce type de ticket.
+  FAQ
 }
 
 /// Un ticket suivi (canal Discord cree par Ticket Tool dans une categorie mappee).

@@ -24,7 +24,8 @@ import { logger } from "../utils/logger.js";
  * 3. detecter la premiere reponse d'un membre du staff ;
  * 4. sur un ticket de recrutement, rattacher les pieces jointes envoyees par le candidat
  *    a sa candidature (les modals Discord ne supportent pas l'upload de fichier) ;
- * 5. si l'auteur est le client ayant ouvert le ticket, tenter une reponse automatique.
+ * 5. sur un ticket FAQ, si l'auteur est le client ayant ouvert le ticket, tenter une reponse
+ *    automatique (mot-cle -> reponse, voir panneau "Tickets" -> "FAQ").
  * Ignore les messages hors guilde (DMs).
  */
 export async function onMessageCreate(message: Message): Promise<void> {
@@ -69,6 +70,8 @@ export async function onMessageCreate(message: Message): Promise<void> {
       logger.error(`Erreur enregistrement piece jointe pour le ticket ${ticket.id}`, error);
     }
   }
+
+  if (ticket.type !== "FAQ") return;
 
   try {
     const reply = await findAutoReply(message.guildId, message.content);
