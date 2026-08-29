@@ -1,14 +1,14 @@
 import { PermissionFlagsBits, SlashCommandBuilder, ChannelType } from "discord.js";
 import type { Command } from "./types.js";
-import { setTicketCategory, addStaffRole, setEscalationMinutes, setRecruitmentLogChannel } from "../services/guildConfigService.js";
+import { setEscalationMinutes, setRecruitmentLogChannel, setPanelChannel } from "../services/guildConfigService.js";
+import { buildRootPanelEmbed, buildRootPanelRow, upsertPanelMessage } from "../services/panelService.js";
 
 /**
- * `/config` : commande d'administration (reservee `ManageGuild`) pour parametrer le bot sur
- * ce serveur — associer des categories a un type de ticket, definir le staff, regler l'escalade,
- * choisir le salon de suivi des candidatures. L'ouverture/fermeture des recrutements est une
- * commande a part, `/recruitment status` (voir `commands/recruitment.ts`).
- * Toutes les sous-commandes ecrivent dans le `GuildConfig` de la guilde courante uniquement
- * (voir `guildConfigService.ts`).
+ * `/config` : commande d'administration (reservee `ManageGuild`). La majorite des reglages
+ * (categories de tickets, roles de gestion, catalogue, recrutement...) se font desormais via
+ * le panneau par boutons (voir `panelService.ts`, `interactionCreate.ts` prefixe `panel:`) —
+ * `set-panel-channel` designe justement le salon qui l'accueille. Seuls les reglages pas
+ * encore migres vers le panneau restent des commandes slash pour cette phase.
  */
 export const configCommand: Command = {
   data: new SlashCommandBuilder()
@@ -17,28 +17,15 @@ export const configCommand: Command = {
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand((sub) =>
       sub
-        .setName("add-category")
-        .setDescription("Associer une catégorie Discord à un type de ticket (Recrutement ou Service)")
+        .setName("set-panel-channel")
+        .setDescription("Salon qui accueille le panneau d'administration par boutons")
         .addChannelOption((opt) =>
           opt
-            .setName("category")
-            .setDescription("Catégorie Discord utilisée par Ticket Tool")
-            .addChannelTypes(ChannelType.GuildCategory)
+            .setName("channel")
+            .setDescription("Salon du panneau")
+            .addChannelTypes(ChannelType.GuildText)
             .setRequired(true)
         )
-        .addStringOption((opt) =>
-          opt
-            .setName("type")
-            .setDescription("Type de ticket pour cette catégorie")
-            .setRequired(true)
-            .addChoices({ name: "Recrutement", value: "RECRUITMENT" }, { name: "Service", value: "SERVICE" })
-        )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("set-staff-role")
-        .setDescription("Ajouter un rôle considéré comme staff de support")
-        .addRoleOption((opt) => opt.setName("role").setDescription("Rôle staff").setRequired(true))
     )
     .addSubcommand((sub) =>
       sub
@@ -69,22 +56,14 @@ export const configCommand: Command = {
     if (!interaction.inGuild()) return;
     const sub = interaction.options.getSubcommand();
 
-    // Associe/reassocie une categorie a un type de ticket : c'est ce mapping que
-    // `getCategoryType` consulte a chaque `channelCreate` pour decider si un canal
-    // doit etre suivi comme ticket, et sous quel flux (recrutement ou service).
-    if (sub === "add-category") {
-      const category = interaction.options.getChannel("category", true);
-      const type = interaction.options.getString("type", true) as "RECRUITMENT" | "SERVICE";
-      await setTicketCategory(interaction.guildId, category.id, type);
-      const typeLabel = type === "RECRUITMENT" ? "Recrutement" : "Service";
-      await interaction.reply({ content: `Catégorie <#${category.id}> associée au type **${typeLabel}**.`, ephemeral: true });
-      return;
-    }
-
-    if (sub === "set-staff-role") {
-      const role = interaction.options.getRole("role", true);
-      await addStaffRole(interaction.guildId, role.id);
-      await interaction.reply({ content: `Rôle staff ajouté : <@&${role.id}>`, ephemeral: true });
+    if (sub === "set-panel-channel") {
+      const channel = interaction.options.getChannel("channel", true);
+      await setPanelChannel(interaction.guildId, channel.id);
+      await upsertPanelMessage(interaction.client, interaction.guildId, "ROOT", channel.id, {
+        embeds: [buildRootPanelEmbed()],
+        components: [buildRootPanelRow()],
+      });
+      await interaction.reply({ content: `Panneau d'administration installé dans <#${channel.id}>.`, ephemeral: true });
       return;
     }
 

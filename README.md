@@ -5,9 +5,11 @@ Bot Discord (Node.js + TypeScript + discord.js + Prisma/PostgreSQL) qui ajoute u
 - **Recrutement** : formulaire de candidature (bouton -> modal) rempli par le candidat des l'ouverture du ticket, suivi pilote par le staff via des boutons (pas de commande a taper) dans un salon de suivi dedie.
 - **Service client** : catalogue de produits/services (photo + champs personnalises par article, configure par le staff), commande composee **par le client lui-meme** (menu deroulant + formulaire), le staff n'a qu'a confirmer le paiement — ce qui genere automatiquement une facture en image.
 
-Plus les fonctions generiques de la base : priorites/tags, escalade automatique, reponses automatiques par mot-cle, webhooks sortants pour brancher des systemes externes.
+Plus les fonctions generiques de la base : priorites/tags, escalade automatique, reponses automatiques par mot-cle (FAQ), demandes d'absence, webhooks sortants pour brancher des systemes externes.
 
-Ticket Tool n'a pas d'API publique : la detection se fait en ecoutant les evenements Discord (creation/suppression/renommage de canal dans la categorie configuree, associee a un type Recrutement ou Service via `/config add-category`).
+Ticket Tool n'a pas d'API publique : la detection se fait en ecoutant les evenements Discord (creation/suppression/renommage de canal dans la categorie configuree, associee a un type Recrutement ou Service via le **panneau d'administration**, voir plus bas).
+
+**Quasiment toute la configuration passe par le panneau d'administration** (messages permanents avec boutons, edites en place) plutot que par des commandes slash — beaucoup plus intuitif que de devoir connaitre/taper des commandes. Il ne reste que quelques commandes slash pour ce qui n'a pas encore rejoint le panneau, plus `/absence` qui est volontairement une commande (accessible a tout le monde, pas un bouton dans un salon potentiellement invisible aux non-staff).
 
 ## Secrets : qui a acces a quoi
 
@@ -39,46 +41,58 @@ Pour mettre a jour apres un push sur GitHub : sur le VPS, `git pull` puis `docke
 
 Aucun port n'est expose publiquement (le bot ne fait que des connexions sortantes vers Discord et les webhooks configures) ; Postgres n'est accessible que depuis le reseau Docker interne.
 
-## Configuration sur un serveur
+## Panneau d'administration
 
-- `/config add-category <category> <type>` : associe une categorie Discord (celle utilisee par un bouton du panel Ticket Tool) a un type de ticket, Recrutement ou Service. Une categorie non configuree est ignoree par le bot (geree par Ticket Tool seul).
-- `/config set-staff-role` : role(s) considere(s) comme staff (pour le temps de premiere reponse, les pings d'escalade, les notifications de nouvelle commande, et l'usage des boutons Statut/S'assigner).
-- `/config set-escalation-timeout` : delai en minutes avant qu'un ticket sans reponse staff declenche une escalade (0 = desactive).
-- `/config set-recruitment-channel [channel]` : salon dedie ou poster le suivi des candidatures (recap + boutons), pour ne pas encombrer le salon du ticket partage avec le candidat. Sans salon configure, le recap est poste dans le salon du ticket lui-meme.
+`/config set-panel-channel <channel>` designe un salon (staff/admin uniquement cote permissions Discord) qui accueille le **message racine** du panneau : 3 boutons, **Tickets**, **Absences**, **FAQ**. Cliquer un bouton active la fonctionnalite et poste (ou met a jour) un **message dedie** dans le meme salon, edite en place a chaque changement plutot que reposte.
 
-L'ouverture/fermeture globale des recrutements est une commande a part : `/recruitment status <Ouvert|Fermé>`. Fermes, les nouveaux tickets Recrutement affichent un message "recrutements fermés" au lieu du bouton de formulaire (les candidatures deja en cours ne sont pas affectees).
+- **Tickets** : gestion des roles de gestion par categorie de ticket ("Ajouter/Retirer un role de gestion" — chaque categorie a sa propre equipe, plus de role staff global unique), plus deux boutons qui ouvrent les messages dedies imbriques **Service client** et **Recrutement** (dans le meme salon).
+- **Service client** : bouton "Definir/Retirer la categorie" (libelle selon l'etat courant), puis gestion du catalogue — ajouter/retirer un article, changer sa photo (envoyee en message juste apres, les modals Discord ne supportent pas l'upload de fichier), ajouter/retirer un champ personnalise par article.
+- **Recrutement** : bouton "Definir/Retirer la categorie", bouton "Ouvrir/Fermer les recrutements" (meme principe, libelle dynamique), et gestion des questions du formulaire de candidature (max 5, style texte court/long) — si aucune n'est configuree, repli automatique sur 5 questions par defaut (Nom RP, Age, Experience RP, Disponibilites, Motivation).
+- **Absences** : configuration du role approbateur et du salon de suivi des demandes (voir section Absences plus bas).
+- **FAQ** : gestion des regles de reponse automatique mot-cle -> reponse.
+
+Chaque message dedie (sauf le message racine) porte une reaction 🗑️ posee automatiquement : cliquer dessus le supprime et reinitialise sa reference en base — recliquer le bouton parent (racine, ou "Tickets" pour Service/Recrutement) le reposte tout neuf. Le message racine n'a jamais cette reaction : c'est le seul point d'entree vers tout le reste, il ne doit pas pouvoir etre supprime par erreur.
+
+## Commandes slash restantes
+
+- `/config set-panel-channel <channel>` — salon du panneau d'administration (voir ci-dessus).
+- `/config set-escalation-timeout <minutes>` — delai avant qu'un ticket sans reponse staff declenche une escalade (0 = desactive).
+- `/config set-recruitment-channel [channel]` — salon dedie ou poster le suivi des candidatures (recap + boutons), pour ne pas encombrer le salon du ticket partage avec le candidat. Sans salon configure, le recap est poste dans le salon du ticket lui-meme.
+- `/absence` — declare une absence (accessible a tout le monde, voir section Absences).
+- `/ticket info` / `/ticket priority <level>` / `/ticket tag add|remove <tag>`.
+- `/stats overview` — tickets ouverts/fermes/escalades, temps de reponse moyen.
+
+`/catalog`, `/recruitment status` et `/autoreply` n'existent plus : entierement remplaces par le panneau d'administration.
 
 ## Recrutement
 
-A l'ouverture d'un ticket dans une categorie de type Recrutement (et si les recrutements sont ouverts, voir `/recruitment status`), le bot poste un bouton "Remplir le formulaire" qui ouvre un modal Discord (5 questions fixes : Nom RP, Age, Experience RP, Disponibilites, Motivation — les modals Discord ne supportent pas l'upload de fichier). A la soumission, le candidat recoit une confirmation qui l'invite aussi a envoyer d'eventuelles photos/documents **directement en message** dans le salon : le bot les rattache automatiquement a la candidature.
+A l'ouverture d'un ticket dans la categorie Recrutement (et si les recrutements sont ouverts, voir panneau "Recrutement"), le bot poste un bouton "Remplir le formulaire" qui ouvre un modal Discord avec les questions configurees (ou les 5 par defaut). A la soumission, le candidat recoit une confirmation qui l'invite aussi a envoyer d'eventuelles photos/documents **directement en message** dans le salon : le bot les rattache automatiquement a la candidature.
 
 Un recap (candidat, statut, recruteur, reponses, pieces jointes) est poste dans le salon de suivi (`/config set-recruitment-channel`, ou le salon du ticket par defaut) avec deux boutons :
 
 - **Statut** — ouvre un menu deroulant ephemere (En attente / Entretien / Accepte / Refuse) ; le message de suivi se met a jour automatiquement. Passer une candidature a **Refuse** marque aussi le ticket comme clôturé côté suivi (arrête l'escalade, sort des stats "ouverts") et prévient le staff dans le salon qu'il peut le fermer via le bouton "Close" de Ticket Tool. La fermeture automatisée a été testée (message direct du bot, puis via webhook de salon) et abandonnée : Ticket Tool ignore tout message qui ne vient pas d'un vrai humain, et un bot ne peut de toute façon pas cliquer le bouton d'un autre bot à sa place (limite Discord). C'est pour ça que le bot ne supprime jamais les messages d'un autre bot qui portent un bouton/menu (voir plus bas) : celui de Ticket Tool doit rester cliquable.
 - **S'assigner** — assigne directement le membre du staff qui clique comme recruteur (reassignation possible).
 
-Ces boutons sont reserves au staff (`/config set-staff-role`) : un clic par quelqu'un d'autre est refuse avec un message explicite. `/ticket info`, execute dans le salon du ticket, affiche aussi le statut de la candidature et le recruteur assigne.
+Ces boutons (et ceux du panneau "Tickets"/"Service client"/"Recrutement") sont reserves aux roles de gestion de la categorie concernee (panneau "Tickets" → "Ajouter un role de gestion") : un clic par quelqu'un d'autre est refuse avec un message explicite. `/ticket info`, execute dans le salon du ticket, affiche aussi le statut de la candidature et le recruteur assigne.
 
 Le bot supprime aussi automatiquement, dans tout ticket suivi, les messages purement informatifs postes par d'autres bots pour garder le salon propre — mais jamais un message qui porte un bouton ou un menu (typiquement le message de bienvenue de Ticket Tool avec son bouton "Close"), pour ne pas priver le staff de sa seule vraie méthode de fermeture. Necessite que le role du bot ait la permission Discord **"Gerer les messages"** sur le serveur ; sans elle, la suppression echoue silencieusement (juste loggee).
 
 ## Service client (catalogue + commande self-service)
 
-Le staff configure le catalogue, le **client compose sa commande lui-meme** dans le ticket, et un seul message de commande est édité en place tout au long du cycle (composition → validation → suivi) plutôt que reposté a chaque fois :
+Le staff configure le catalogue via le panneau "Service client", le **client compose sa commande lui-meme** dans le ticket, et un seul message de commande est édité en place tout au long du cycle (composition → validation → suivi) plutôt que reposté a chaque fois :
 
-1. `/catalog add <name> <price> <image> [description]` — cree un article (photo obligatoire).
-2. `/catalog field-add <item> <label> <style> [required]` — jusqu'a 5 champs par article, a remplir par le client lors de la commande (ex: date + nombre d'invites pour une salle, quantite + boisson pour un menu). Le style `Quantite` alimente automatiquement le calcul du prix ; les autres styles (`Texte court`/`Texte long`) sont juste enregistres et affiches sur la facture. Les options d'article (`id`/`item`/`field-id`) proposent une recherche par nom en tapant, pas besoin de copier un identifiant.
-3. A l'ouverture d'un ticket Service, le bot poste un menu deroulant du catalogue actif. Le client choisit un article -> un formulaire genere a partir des champs configures s'ouvre -> il peut ajouter d'autres articles -> "Valider la commande" ping le role staff.
-4. Cote staff, directement sur le message de commande : **Statut** (menu deroulant), **Marquer payée** (bascule le paiement et **genere/poste automatiquement l'image de facture**), **Facture** (renvoie l'image), **Ajouter un article** (reutilise le menu du client), **Retirer un article** (menu des lignes existantes) — pour des corrections manuelles exceptionnelles. Boutons reserves au staff.
+1. Panneau "Service client" → "Ajouter un article" (modal nom/prix/description) → "Changer la photo d'un article" (envoyee en message juste apres, les modals ne supportent pas l'upload).
+2. "Ajouter un champ" — jusqu'a 5 champs par article, a remplir par le client lors de la commande (ex: date + nombre d'invites pour une salle, quantite + boisson pour un menu). Le style `Quantite` alimente automatiquement le calcul du prix ; les autres styles (`Texte court`/`Texte long`) sont juste enregistres et affiches sur la facture.
+3. A l'ouverture d'un ticket Service, le bot poste un menu deroulant du catalogue actif. Le client choisit un article -> un formulaire genere a partir des champs configures s'ouvre -> il peut ajouter d'autres articles -> "Valider la commande" ping les roles de gestion de la categorie.
+4. Cote staff, directement sur le message de commande : **Statut** (menu deroulant), **Marquer payée** (bascule le paiement et **genere/poste automatiquement l'image de facture**), **Facture** (renvoie l'image), **Ajouter un article** (reutilise le menu du client), **Retirer un article** (menu des lignes existantes) — pour des corrections manuelles exceptionnelles. Boutons reserves aux roles de gestion de la categorie.
 
-Autres commandes catalogue : `/catalog list`, `/catalog view <id>`, `/catalog remove <id>`, `/catalog field-remove <field-id>`.
+## Absences
 
-## Commandes generiques
+Panneau "Absences" → configurer le **role approbateur** et le **salon de suivi** (separe du salon panneau). Une fois les deux definis, n'importe quel membre peut declarer une absence avec `/absence` (dates JJ/MM/AAAA + motif). La demande est postee dans le salon de suivi avec deux boutons **Accepter**/**Refuser**, reserves au role approbateur ; le message se met a jour en place (statut, qui a traite) une fois resolue.
 
-- `/ticket info` — resume du ticket courant (statut, priorite, tags, opener, + bloc specifique Recrutement ou Service).
-- `/ticket priority <level>` — LOW / NORMAL / HIGH / URGENT.
-- `/ticket tag add|remove <tag>`.
-- `/autoreply add|remove|list` — regles de reponse automatique mot-cle.
-- `/stats overview` — tickets ouverts/fermes/escalades, temps de reponse moyen.
+## FAQ (reponses automatiques)
+
+Panneau "FAQ" → "Ajouter une règle" (modal mot-clé/réponse) / "Retirer une règle". Declenchee quand le client ayant ouvert un ticket ecrit un message contenant le mot-cle (recherche simple, insensible a la casse).
 
 ## Points d'extension
 

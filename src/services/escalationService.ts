@@ -20,6 +20,7 @@ import { dispatchWebhook } from "./webhookDispatcher.js";
 async function checkStaleTickets(client: Client): Promise<void> {
   const configs = await prisma.guildConfig.findMany({
     where: { escalationMinutes: { not: null } },
+    include: { ticketCategories: true },
   });
 
   for (const config of configs) {
@@ -42,7 +43,8 @@ async function checkStaleTickets(client: Client): Promise<void> {
         const channel = await client.channels.fetch(ticket.channelId);
         if (!channel || channel.type !== ChannelType.GuildText) continue;
 
-        const mentions = config.staffRoleIds.map((roleId) => `<@&${roleId}>`).join(" ");
+        const category = config.ticketCategories.find((c) => c.categoryId === ticket.categoryId);
+        const mentions = (category?.managerRoleIds ?? []).map((roleId) => `<@&${roleId}>`).join(" ");
         if (mentions) {
           await channel.send(`⚠️ Ticket sans réponse depuis plus de ${config.escalationMinutes} min. ${mentions}`);
         }

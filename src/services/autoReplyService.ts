@@ -27,6 +27,21 @@ export const keywordMatcher: AutoReplyMatcher = {
 // Le premier matcher a repondre gagne.
 const matchers: AutoReplyMatcher[] = [keywordMatcher];
 
+/** Liste les regles d'une guilde (pour le recapitulatif du panneau "FAQ"). */
+export async function listRules(guildId: string) {
+  return prisma.autoReplyRule.findMany({ where: { guildId }, orderBy: { createdAt: "asc" } });
+}
+
+/** Cree une regle de reponse automatique (active par defaut). */
+export async function addRule(guildId: string, trigger: string, response: string) {
+  return prisma.autoReplyRule.create({ data: { guildId, trigger, response } });
+}
+
+/** Supprime une regle. No-op si l'id n'existe pas ou n'appartient pas a cette guilde. */
+export async function removeRule(guildId: string, id: string) {
+  await prisma.autoReplyRule.deleteMany({ where: { id, guildId } });
+}
+
 /**
  * Essaie chaque matcher dans l'ordre et retourne la premiere reponse trouvee (ou `null`
  * si aucun matcher ne repond). Utilise par `onMessageCreate` pour repondre automatiquement

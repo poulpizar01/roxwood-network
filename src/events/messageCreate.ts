@@ -1,5 +1,5 @@
 import type { Message } from "discord.js";
-import { getGuildConfig, isStaffMember } from "../services/guildConfigService.js";
+import { getGuildConfig, isTicketManager } from "../services/guildConfigService.js";
 import { getTicketByChannel, recordActivity, recordFirstStaffReply } from "../services/ticketService.js";
 import { findAutoReply } from "../services/autoReplyService.js";
 import { addAttachment } from "../services/recruitmentService.js";
@@ -38,7 +38,7 @@ export async function onMessageCreate(message: Message): Promise<void> {
 
   const config = await getGuildConfig(message.guildId);
   const memberRoleIds = message.member ? [...message.member.roles.cache.keys()] : [];
-  const authorIsStaff = isStaffMember(config, memberRoleIds);
+  const authorIsStaff = isTicketManager(config, ticket.categoryId, memberRoleIds);
 
   await recordActivity(message.channelId);
 

@@ -43,6 +43,24 @@ export async function listActive(guildId: string) {
   });
 }
 
+/** Comme `listActive`, avec les champs personnalises inclus — pour le recapitulatif du panneau. */
+export async function listActiveWithFields(guildId: string) {
+  return prisma.catalogItem.findMany({
+    where: { guildId, active: true },
+    orderBy: { createdAt: "asc" },
+    include: { fields: { orderBy: { position: "asc" } } },
+  });
+}
+
+/**
+ * Definit (ou remplace) la photo d'un article. Separee de `addItem` : les modals Discord ne
+ * supportant pas l'upload de fichier, la photo est envoyee dans un second temps en message
+ * classique dans le salon du panneau (voir `handleServiceSetImageSelect`).
+ */
+export async function setItemImage(guildId: string, id: string, imageUrl: string) {
+  await prisma.catalogItem.updateMany({ where: { id, guildId }, data: { imageUrl } });
+}
+
 /**
  * Recupere un article (avec ses champs personnalises, ordonnes par `position`) en verifiant
  * qu'il appartient bien a la guilde donnee — evite qu'un id d'article d'un autre serveur

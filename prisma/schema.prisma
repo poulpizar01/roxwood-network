@@ -13,8 +13,6 @@ model GuildConfig {
   id                String   @id @default(cuid())
   /// Id de la guilde Discord, cle metier utilisee partout ailleurs dans le code (pas `id`).
   guildId           String   @unique
-  /// Roles consideres comme "staff" (temps de reponse, escalade, notifications de commande).
-  staffRoleIds      String[]
   /// Delai (minutes) sans reponse staff avant escalade d'un ticket. `null` = escalade desactivee.
   escalationMinutes Int?
   /// Salon dedie ou sont postes les recaps de candidature (avec boutons Statut/S'assigner),
@@ -24,25 +22,43 @@ model GuildConfig {
   /// Si `false`, les nouveaux tickets RECRUITMENT reçoivent un message "recrutements fermés"
   /// au lieu du bouton de formulaire. N'affecte pas les candidatures deja en cours.
   recruitmentOpen   Boolean  @default(true)
+  /// Salon designe pour heberger les messages permanents du panneau d'administration
+  /// (voir PanelMessage). Un seul salon par guilde.
+  panelChannelId    String?
+  /// Role autorise a accepter/refuser une demande d'absence (boutons du message de suivi
+  /// dans `absenceReviewChannelId`). `null` = personne configure, le bouton "Declarer une
+  /// absence" reste desactive tant que ce role n'est pas defini.
+  absenceApproverRoleId  String?
+  /// Salon dedie ou sont postees les demandes d'absence pour validation staff — separe du
+  /// salon panneau, meme logique que `recruitmentLogChannelId`. `null` = pas configure.
+  absenceReviewChannelId String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  tickets          Ticket[]
-  autoReplyRules   AutoReplyRule[]
-  webhooks         WebhookSubscription[]
-  ticketCategories TicketCategoryConfig[]
-  catalogItems     CatalogItem[]
+  tickets              Ticket[]
+  autoReplyRules       AutoReplyRule[]
+  webhooks             WebhookSubscription[]
+  ticketCategories     TicketCategoryConfig[]
+  catalogItems         CatalogItem[]
+  panelMessages        PanelMessage[]
+  absenceRequests      AbsenceRequest[]
+  recruitmentQuestions RecruitmentQuestion[]
 }
 
-/// Associe une categorie Discord a un type de ticket. Une categorie absente de cette table
-/// n'est pas suivie par le bot (les autres boutons du panel Ticket Tool restent geres par
-/// Ticket Tool seul, hors perimetre).
+/// Associe une categorie Discord a un type de ticket ET a ses roles de gestion. Une categorie
+/// absente de cette table n'est pas suivie par le bot (les autres boutons du panel Ticket
+/// Tool restent geres par Ticket Tool seul, hors perimetre). `managerRoleIds` remplace
+/// l'ancien role staff global unique : chaque categorie a sa propre equipe (ex: role RH pour
+/// une categorie Candidatures, role Vente pour une categorie Boutique).
 model TicketCategoryConfig {
-  id         String     @id @default(cuid())
-  guildId    String
+  id             String     @id @default(cuid())
+  guildId        String
   /// Id de la categorie Discord (celle utilisee par un bouton du panel Ticket Tool).
-  categoryId String
-  type       TicketType
+  categoryId     String
+  type           TicketType
+  /// Roles autorises a gerer les tickets de cette categorie (boutons Statut/Assigner/etc.,
+  /// escalade, detection de la 1ere reponse staff).
+  managerRoleIds String[]   @default([])
 
   guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
 
@@ -208,6 +224,29 @@ enum ApplicationStatus {
   REJECTED
 }
 
+/// Question configurable du formulaire de candidature (panneau "Recrutement" -> "Ajouter une
+/// question"). Si la guilde n'en a configure aucune, le formulaire repli sur 5 questions par
+/// defaut codees en dur (voir `DEFAULT_RECRUITMENT_QUESTIONS` dans `recruitmentQuestionService.ts`).
+/// Max 5 par guilde — meme contrainte Discord que les champs de catalogue (un modal ne peut
+/// afficher que 5 `TextInputComponent` au plus).
+model RecruitmentQuestion {
+  id       String                @id @default(cuid())
+  guildId  String
+  label    String
+  style    RecruitmentFieldStyle
+  /// Ordre d'affichage dans le modal (0 = premiere question).
+  position Int                   @default(0)
+
+  guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
+
+  @@index([guildId])
+}
+
+enum RecruitmentFieldStyle {
+  SHORT
+  PARAGRAPH
+}
+
 /// Article du catalogue configure par le staff (`/catalog`) : ce que le client peut
 /// commander lui-meme dans un ticket SERVICE. Chaque article peut definir ses propres
 /// champs a remplir par le client (`fields`), pour s'adapter a des produits/services
@@ -322,4 +361,66 @@ enum OrderStatus {
 enum PaymentStatus {
   UNPAID
   PAID
+}
+
+/// Message permanent (avec boutons/menus) du panneau d'administration, edite en place a
+/// chaque changement plutot que reposte. Au plus un message par (guildId, key). `enabled`
+/// distingue "jamais active" de "actif" (permet de reactiver plus tard sans perdre la trace
+/// du message).
+model PanelMessage {
+  id        String          @id @default(cuid())
+  guildId   String
+  key       PanelMessageKey
+  /// Id du message dans le salon panneau de la guilde. `null` tant que jamais poste.
+  messageId String?
+  enabled   Boolean         @default(false)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
+
+  @@unique([guildId, key])
+}
+
+/// Chaque fonctionnalite gerable depuis le panneau. ROOT est le message racine (3 boutons) ;
+/// les autres sont les messages dedies crees quand on active la fonctionnalite correspondante.
+enum PanelMessageKey {
+  ROOT
+  TICKETS
+  SERVICE
+  RECRUITMENT
+  ABSENCES
+  FAQ
+}
+
+/// Demande d'absence declaree par un membre via le panneau ("Absences" -> "Declarer une
+/// absence"), validee ensuite par le role approbateur configure, dans le salon de suivi
+/// dedie (message edite en place a la resolution — meme principe que le suivi de candidature).
+model AbsenceRequest {
+  id          String        @id @default(cuid())
+  guildId     String
+  requesterId String
+  startDate   DateTime
+  endDate     DateTime
+  reason      String
+  status      AbsenceStatus @default(PENDING)
+  /// Membre du staff ayant accepte/refuse la demande. `null` tant qu'en attente.
+  resolverId  String?
+  resolvedAt  DateTime?
+  /// Salon et message de suivi, memorises au moment de l'envoi (pas relus depuis la config)
+  /// pour retrouver le bon message meme si `absenceReviewChannelId` change ensuite —
+  /// meme raisonnement que `RecruitmentApplication.logChannelId`/`logMessageId`.
+  channelId   String?
+  messageId   String?
+  createdAt   DateTime      @default(now())
+
+  guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
+
+  @@index([guildId, status])
+}
+
+enum AbsenceStatus {
+  PENDING
+  ACCEPTED
+  REFUSED
 }
