@@ -1,6 +1,6 @@
 import type { Message } from "discord.js";
 import { getGuildConfig, isTicketManager } from "../services/guildConfigService.js";
-import { getTicketByChannel, recordActivity, recordFirstStaffReply } from "../services/ticketService.js";
+import { getTicketByChannel, recordFirstStaffReply } from "../services/ticketService.js";
 import { findAutoReply } from "../services/autoReplyService.js";
 import { addAttachment } from "../services/recruitmentService.js";
 import { refreshRecruitmentLogMessage } from "../services/recruitmentLogService.js";
@@ -20,11 +20,10 @@ import { logger } from "../utils/logger.js";
  *    ou un menu (typiquement le bouton "Close" de Ticket Tool) : impossible de simuler un
  *    clic sur un composant d'un autre bot (Discord ne le permet pas), donc ce bouton reste
  *    le seul moyen reel de fermer un ticket cote Ticket Tool et doit rester accessible au staff ;
- * 2. mettre a jour l'activite du ticket (base du calcul d'escalade) ;
- * 3. detecter la premiere reponse d'un membre du staff ;
- * 4. sur un ticket de recrutement, rattacher les pieces jointes envoyees par le candidat
+ * 2. detecter la premiere reponse d'un membre du staff ;
+ * 3. sur un ticket de recrutement, rattacher les pieces jointes envoyees par le candidat
  *    a sa candidature (les modals Discord ne supportent pas l'upload de fichier) ;
- * 5. sur un ticket FAQ, si l'auteur est le client ayant ouvert le ticket, tenter une reponse
+ * 4. sur un ticket FAQ, si l'auteur est le client ayant ouvert le ticket, tenter une reponse
  *    automatique (mot-cle -> reponse, voir panneau "Tickets" -> "FAQ").
  * Ignore les messages hors guilde (DMs).
  */
@@ -48,8 +47,6 @@ export async function onMessageCreate(message: Message): Promise<void> {
   const config = await getGuildConfig(message.guildId);
   const memberRoleIds = message.member ? [...message.member.roles.cache.keys()] : [];
   const authorIsStaff = isTicketManager(config, ticket.categoryId, memberRoleIds);
-
-  await recordActivity(message.channelId);
 
   if (authorIsStaff) {
     await recordFirstStaffReply(message.channelId);

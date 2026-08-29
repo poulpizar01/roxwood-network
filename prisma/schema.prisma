@@ -13,8 +13,6 @@ model GuildConfig {
   id                String   @id @default(cuid())
   /// Id de la guilde Discord, cle metier utilisee partout ailleurs dans le code (pas `id`).
   guildId           String   @unique
-  /// Delai (minutes) sans reponse staff avant escalade d'un ticket. `null` = escalade desactivee.
-  escalationMinutes Int?
   /// Salon dedie ou sont postes les recaps de candidature (avec boutons Statut/S'assigner),
   /// pour que le suivi reste visible par le staff sans polluer le salon du ticket (partage
   /// avec le candidat). `null` = pas configure, le recap est poste dans le salon du ticket.
@@ -67,7 +65,7 @@ model TicketCategoryConfig {
   categoryId     String
   type           TicketType
   /// Roles autorises a gerer les tickets de cette categorie (boutons Statut/Assigner/etc.,
-  /// escalade, detection de la 1ere reponse staff).
+  /// detection de la 1ere reponse staff).
   managerRoleIds String[]   @default([])
 
   guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
@@ -100,34 +98,17 @@ model Ticket {
   /// (best-effort : peut etre `null` si non determinable).
   openerId          String?
   status            TicketStatus   @default(OPEN)
-  priority          TicketPriority @default(NORMAL)
   createdAt         DateTime       @default(now())
   closedAt          DateTime?
-  /// Renseigne a la 1ere reponse d'un membre du staff (base du calcul de temps de reponse et d'escalade).
+  /// Renseigne a la 1ere reponse d'un membre du staff (base du calcul de temps de reponse moyen, voir /stats).
   firstStaffReplyAt DateTime?
-  /// Mis a jour a chaque message dans le ticket ; sert de reference pour detecter l'inactivite (escalade).
-  lastActivityAt    DateTime       @default(now())
-  /// Renseigne des qu'une escalade a ete declenchee, pour ne jamais re-escalader le meme ticket.
-  escalatedAt       DateTime?
 
   guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
-  tags        TicketTag[]
   application RecruitmentApplication?
   order       ServiceOrder?
 
   @@index([guildId, status])
   @@index([guildId, type])
-}
-
-/// Tag libre pose sur un ticket (`/ticket tag add|remove`), independant du type de ticket.
-model TicketTag {
-  id       String @id @default(cuid())
-  ticketId String
-  tag      String
-
-  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-
-  @@unique([ticketId, tag])
 }
 
 /// Regle de reponse automatique par mot-cle (`/autoreply`), declenchee sur les messages
@@ -152,7 +133,7 @@ model AutoReplyRule {
 model WebhookSubscription {
   id        String   @id @default(cuid())
   guildId   String
-  /// Type d'evenement declencheur (ex: "ticket.created", "ticket.closed", "ticket.escalated").
+  /// Type d'evenement declencheur (ex: "ticket.created", "ticket.closed").
   eventType String
   url       String
   /// Secret utilise pour signer le corps de la requete (header X-Signature-256).
@@ -168,13 +149,6 @@ model WebhookSubscription {
 enum TicketStatus {
   OPEN
   CLOSED
-}
-
-enum TicketPriority {
-  LOW
-  NORMAL
-  HIGH
-  URGENT
 }
 
 /// Candidature associee a un ticket RECRUITMENT (relation 1:1). Cree des l'ouverture du

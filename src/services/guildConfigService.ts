@@ -162,18 +162,6 @@ export async function removeCategoryManagerRole(guildId: string, categoryId: str
   return refresh(guildId);
 }
 
-/**
- * Definit le delai (en minutes) d'inactivite staff avant escalade d'un ticket.
- * `null` desactive l'escalade pour cette guilde (voir `escalationService.ts`).
- */
-export async function setEscalationMinutes(guildId: string, minutes: number | null): Promise<GuildConfigWithCategories> {
-  await ensureGuildConfig(guildId);
-  await prisma.guildConfig.update({
-    where: { guildId },
-    data: { escalationMinutes: minutes },
-  });
-  return refresh(guildId);
-}
 
 /**
  * Definit le salon dedie au suivi des candidatures (recap + boutons Statut/S'assigner).
@@ -222,12 +210,32 @@ export async function setAbsenceApproverRole(guildId: string, roleId: string): P
   return refresh(guildId);
 }
 
+/** Retire le role approbateur des demandes d'absence. */
+export async function clearAbsenceApproverRole(guildId: string): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.guildConfig.update({
+    where: { guildId },
+    data: { absenceApproverRoleId: null },
+  });
+  return refresh(guildId);
+}
+
 /** Definit le salon de suivi dedie aux demandes d'absence (separe du salon panneau). */
 export async function setAbsenceReviewChannel(guildId: string, channelId: string): Promise<GuildConfigWithCategories> {
   await ensureGuildConfig(guildId);
   await prisma.guildConfig.update({
     where: { guildId },
     data: { absenceReviewChannelId: channelId },
+  });
+  return refresh(guildId);
+}
+
+/** Retire le salon de suivi des demandes d'absence. */
+export async function clearAbsenceReviewChannel(guildId: string): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.guildConfig.update({
+    where: { guildId },
+    data: { absenceReviewChannelId: null },
   });
   return refresh(guildId);
 }

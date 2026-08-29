@@ -12,7 +12,6 @@ import { logger } from "../utils/logger.js";
 export type WebhookEventType =
   | "ticket.created"
   | "ticket.closed"
-  | "ticket.escalated"
   | "monitoring.shift"
   | "monitoring.recruitment"
   | "monitoring.safe"

@@ -1,14 +1,13 @@
 import { REST, Routes, type Client } from "discord.js";
 import { env } from "../config/env.js";
 import { commands } from "../commands/index.js";
-import { startEscalationJob } from "../services/escalationService.js";
 import { refreshAllPanelsAcrossGuilds } from "../services/panelService.js";
 import { logger } from "../utils/logger.js";
 
 /**
  * Handler `ClientReady`, declenche une seule fois quand le bot est connecte a la gateway.
- * Enregistre les commandes slash aupres de l'API Discord, rafraichit le panneau d'administration
- * de toutes les guildes, puis demarre le job d'escalade.
+ * Enregistre les commandes slash aupres de l'API Discord, puis rafraichit le panneau
+ * d'administration de toutes les guildes.
  *
  * L'enregistrement se fait soit sur une seule guilde de dev (`DEV_GUILD_ID`, propagation
  * instantanee — pratique en developpement), soit globalement (propagation jusqu'a ~1h,
@@ -43,6 +42,4 @@ export async function onReady(readyClient: Client<true>): Promise<void> {
   } catch (error) {
     logger.error("Echec du rafraichissement du panneau d'administration au demarrage", error);
   }
-
-  startEscalationJob(readyClient);
 }

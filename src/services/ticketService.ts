@@ -85,18 +85,6 @@ export async function markTicketClosed(channelId: string, guildId: string): Prom
 }
 
 /**
- * Met a jour `lastActivityAt` du ticket associe a ce canal (appele a chaque message).
- * Sert de base au calcul d'escalade (voir `escalationService.ts`) : un ticket est considere
- * "stale" quand ce timestamp est trop ancien sans reponse staff.
- */
-export async function recordActivity(channelId: string): Promise<void> {
-  await prisma.ticket.updateMany({
-    where: { channelId },
-    data: { lastActivityAt: new Date() },
-  });
-}
-
-/**
  * Renseigne `firstStaffReplyAt` la premiere fois qu'un membre du staff repond dans le ticket.
  * La clause `firstStaffReplyAt: null` dans le `where` rend l'operation idempotente : les
  * appels suivants (2e, 3e reponse staff...) ne modifient plus rien.
@@ -109,14 +97,13 @@ export async function recordFirstStaffReply(channelId: string): Promise<void> {
 }
 
 /**
- * Recupere le ticket associe a un canal Discord (avec ses tags), ou `undefined`/`null`
- * si ce canal n'est pas suivi. Point d'entree utilise par la quasi-totalite des commandes
- * et handlers d'interaction pour savoir "sur quel ticket suis-je en train d'agir ?".
+ * Recupere le ticket associe a un canal Discord, ou `undefined`/`null` si ce canal n'est pas
+ * suivi. Point d'entree utilise par la quasi-totalite des commandes et handlers d'interaction
+ * pour savoir "sur quel ticket suis-je en train d'agir ?".
  */
 export async function getTicketByChannel(channelId: string) {
   return prisma.ticket.findUnique({
     where: { channelId },
-    include: { tags: true },
   });
 }
 

@@ -186,11 +186,21 @@ export async function buildAbsencesPanelEmbed(guildId: string): Promise<EmbedBui
     );
 }
 
-/** Boutons de configuration du message dedie "Absences" (role approbateur, salon de suivi). */
-export function buildAbsencesPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
+/**
+ * Boutons de configuration du message dedie "Absences" : role approbateur et salon de suivi,
+ * chacun en bouton unique Definir/Retirer selon l'etat courant — meme convention que les
+ * categories de ticket (Service client/Recrutement/FAQ) et les salons de Monitoring.
+ */
+export function buildAbsencesPanelRows(approverRoleId: string | null, reviewChannelId: string | null): ActionRowBuilder<ButtonBuilder>[] {
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("panel:absences:set-approver-role").setLabel("Définir le rôle approbateur").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("panel:absences:set-review-channel").setLabel("Définir le salon de suivi").setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder()
+      .setCustomId(approverRoleId ? "panel:absences:clear-approver-role" : "panel:absences:set-approver-role")
+      .setLabel(approverRoleId ? "Retirer le rôle approbateur" : "Définir le rôle approbateur")
+      .setStyle(approverRoleId ? ButtonStyle.Danger : ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(reviewChannelId ? "panel:absences:clear-review-channel" : "panel:absences:set-review-channel")
+      .setLabel(reviewChannelId ? "Retirer le salon de suivi" : "Définir le salon de suivi")
+      .setStyle(reviewChannelId ? ButtonStyle.Danger : ButtonStyle.Success)
   );
   return [row];
 }
@@ -240,7 +250,7 @@ export function buildServicePanelRows(categoryId: string | null): ActionRowBuild
       .setStyle(categoryId ? ButtonStyle.Danger : ButtonStyle.Success)
   );
   const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("panel:service:add-item").setLabel("Ajouter un article").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("panel:service:add-item").setLabel("Ajouter un article").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("panel:service:remove-item").setLabel("Retirer un article").setStyle(ButtonStyle.Danger)
   );
   const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -351,7 +361,7 @@ export function buildFaqPanelRows(categoryId: string | null): ActionRowBuilder<B
       .setStyle(categoryId ? ButtonStyle.Danger : ButtonStyle.Success)
   );
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("panel:faq:add-rule").setLabel("Ajouter une règle").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("panel:faq:add-rule").setLabel("Ajouter une règle").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("panel:faq:remove-rule").setLabel("Retirer une règle").setStyle(ButtonStyle.Danger)
   );
   return [categoryRow, row];
@@ -469,9 +479,10 @@ export async function refreshRecruitmentPanelMessage(client: Client, guildId: st
 }
 
 export async function refreshAbsencesPanelMessage(client: Client, guildId: string, channelId: string): Promise<void> {
+  const config = await getGuildConfig(guildId);
   await upsertPanelMessage(client, guildId, "ABSENCES", channelId, {
     embeds: [await buildAbsencesPanelEmbed(guildId)],
-    components: buildAbsencesPanelRows(),
+    components: buildAbsencesPanelRows(config?.absenceApproverRoleId ?? null, config?.absenceReviewChannelId ?? null),
   });
 }
 

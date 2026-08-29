@@ -16,10 +16,9 @@ export const statsCommand: Command = {
   async execute(interaction) {
     if (!interaction.inGuild()) return;
 
-    const [open, closed, escalated] = await Promise.all([
+    const [open, closed] = await Promise.all([
       prisma.ticket.count({ where: { guildId: interaction.guildId, status: "OPEN" } }),
       prisma.ticket.count({ where: { guildId: interaction.guildId, status: "CLOSED" } }),
-      prisma.ticket.count({ where: { guildId: interaction.guildId, escalatedAt: { not: null } } }),
     ]);
 
     const respondedTickets = await prisma.ticket.findMany({
@@ -44,7 +43,6 @@ export const statsCommand: Command = {
       .addFields(
         { name: "Ouverts", value: String(open), inline: true },
         { name: "Fermés", value: String(closed), inline: true },
-        { name: "Escalades", value: String(escalated), inline: true },
         {
           name: "Temps de réponse moyen (staff)",
           value: avgResponseMinutes !== null ? `${avgResponseMinutes} min` : "pas de données",

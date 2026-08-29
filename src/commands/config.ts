@@ -1,6 +1,6 @@
 import { PermissionFlagsBits, SlashCommandBuilder, ChannelType } from "discord.js";
 import type { Command } from "./types.js";
-import { setEscalationMinutes, setPanelChannel } from "../services/guildConfigService.js";
+import { setPanelChannel } from "../services/guildConfigService.js";
 import { refreshRootPanelMessage } from "../services/panelService.js";
 
 /**
@@ -26,18 +26,6 @@ export const configCommand: Command = {
             .addChannelTypes(ChannelType.GuildText)
             .setRequired(true)
         )
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("set-escalation-timeout")
-        .setDescription("Délai (minutes) avant escalade d'un ticket sans réponse staff")
-        .addIntegerOption((opt) =>
-          opt
-            .setName("minutes")
-            .setDescription("0 pour désactiver l'escalade")
-            .setMinValue(0)
-            .setRequired(true)
-        )
     ) as SlashCommandBuilder,
 
   async execute(interaction) {
@@ -49,18 +37,6 @@ export const configCommand: Command = {
       await setPanelChannel(interaction.guildId, channel.id);
       await refreshRootPanelMessage(interaction.client, interaction.guildId, channel.id);
       await interaction.reply({ content: `Panneau d'administration installé dans <#${channel.id}>.`, ephemeral: true });
-      return;
-    }
-
-    // 0 minute = desactive l'escalade (stocke comme `null` en base) plutot que de la
-    // regler a un delai de zero seconde, ce qui n'aurait pas de sens metier.
-    if (sub === "set-escalation-timeout") {
-      const minutes = interaction.options.getInteger("minutes", true);
-      await setEscalationMinutes(interaction.guildId, minutes === 0 ? null : minutes);
-      await interaction.reply({
-        content: minutes === 0 ? "Escalade désactivée." : `Escalade fixée à ${minutes} min sans réponse staff.`,
-        ephemeral: true,
-      });
     }
   },
 };

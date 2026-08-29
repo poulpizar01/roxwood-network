@@ -1,6 +1,5 @@
 import type { Command } from "./types.js";
 import { configCommand } from "./config.js";
-import { ticketCommand } from "./ticket.js";
 import { statsCommand } from "./stats.js";
 import { absenceCommand } from "./absence.js";
 import { stockCommand } from "./stock.js";
@@ -13,9 +12,10 @@ import { stockCommand } from "./stock.js";
  * Le catalogue (`/catalog`), l'etat des recrutements (`/recruitment status`) et les regles de
  * reponse automatique (`/autoreply`) sont entierement geres par le panneau d'administration
  * par boutons (voir `panelService.ts`, prefixe "panel:" dans interactionCreate.ts) — plus de
- * commandes slash pour ces trois fonctionnalites.
+ * commandes slash pour ces trois fonctionnalites. `/ticket` (info/priority/tag) et l'escalade
+ * ont ete retires (jamais utilises) — voir memoire projet si besoin de les reintroduire.
  */
-export const commands: Command[] = [configCommand, ticketCommand, statsCommand, absenceCommand, stockCommand];
+export const commands: Command[] = [configCommand, statsCommand, absenceCommand, stockCommand];
 
 /** Index des commandes par nom (`data.name`), pour une resolution O(1) a chaque interaction. */
 export const commandsByName = new Map(commands.map((c) => [c.data.name, c]));

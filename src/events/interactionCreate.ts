@@ -44,6 +44,8 @@ import {
 import { ORDER_STATUS_CHOICES, orderStatusLabel, sendInvoiceForOrder, upsertOrderMessage } from "../services/orderLogService.js";
 import {
   addCategoryManagerRole,
+  clearAbsenceApproverRole,
+  clearAbsenceReviewChannel,
   clearCategoryForType,
   clearMonitoringChannel,
   getGuildConfig,
@@ -857,6 +859,15 @@ async function handlePanelAbsencesSetApproverRoleSelect(interaction: Interaction
   await interaction.update({ content: `Rôle approbateur défini sur <@&${roleId}>.`, components: [] });
 }
 
+/** Clic sur "Retirer le rôle approbateur" : retire directement, un seul rôle possible. */
+async function handlePanelAbsencesClearApproverRole(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId || !interaction.channelId) return;
+
+  await clearAbsenceApproverRole(interaction.guildId);
+  await refreshAbsencesPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.reply({ content: "Rôle approbateur retiré.", ephemeral: true });
+}
+
 /** Clic sur "Définir le salon de suivi" : menu natif Discord filtre aux salons textuels. */
 async function handlePanelAbsencesSetReviewChannel(interaction: Interaction): Promise<void> {
   if (!interaction.isButton()) return;
@@ -876,6 +887,15 @@ async function handlePanelAbsencesSetReviewChannelSelect(interaction: Interactio
   await setAbsenceReviewChannel(interaction.guildId, channelId);
   await refreshAbsencesPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
   await interaction.update({ content: `Salon de suivi défini sur <#${channelId}>.`, components: [] });
+}
+
+/** Clic sur "Retirer le salon de suivi" : retire directement, un seul salon possible. */
+async function handlePanelAbsencesClearReviewChannel(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId || !interaction.channelId) return;
+
+  await clearAbsenceReviewChannel(interaction.guildId);
+  await refreshAbsencesPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.reply({ content: "Salon de suivi retiré.", ephemeral: true });
 }
 
 /**
@@ -1597,7 +1617,9 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:tickets:add-role") return await handlePanelTicketsAddRole(interaction);
       if (interaction.customId === "panel:tickets:remove-role") return await handlePanelTicketsRemoveRole(interaction);
       if (interaction.customId === "panel:absences:set-approver-role") return await handlePanelAbsencesSetApproverRole(interaction);
+      if (interaction.customId === "panel:absences:clear-approver-role") return await handlePanelAbsencesClearApproverRole(interaction);
       if (interaction.customId === "panel:absences:set-review-channel") return await handlePanelAbsencesSetReviewChannel(interaction);
+      if (interaction.customId === "panel:absences:clear-review-channel") return await handlePanelAbsencesClearReviewChannel(interaction);
       if (interaction.customId.startsWith("absence:accept:")) {
         return await handleAbsenceResolve(interaction, interaction.customId.slice("absence:accept:".length), "ACCEPTED");
       }
