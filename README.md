@@ -110,6 +110,8 @@ Effets automatiques :
 
 Tout log reçu (que le texte libre de sa description ait pu être parsé ou non) est conservé en base (`MonitoringEvent`) et jamais perdu — un format de description inattendu désactive juste l'effet automatique correspondant (avertissement loggé), le reste continue de fonctionner.
 
+**Sécurité des webhooks** : c'est du push sortant uniquement (le bot POST vers l'URL configurée, aucun port/serveur exposé côté bot), et l'isolation entre serveurs Discord est garantie côté code — `dispatchWebhook` ne va chercher que les abonnements de la guilde concernée, jamais ceux d'un autre serveur. La signature HMAC-SHA256 permet au récepteur de vérifier l'authenticité des requêtes, mais **seulement s'il implémente lui-même cette vérification** — le bot ne peut pas l'y forcer (même principe que les webhooks Stripe/GitHub). Les actions sensibles du panneau "Monitoring" (jobId, rôle "en service", salons, webhooks sortants) exigent la permission Discord **"Gérer le serveur"**, en plus des permissions du salon panneau lui-même — contrairement au reste du panneau, qui ne s'appuie que sur la visibilité du salon.
+
 ## Points d'extension
 
 - `src/services/autoReplyService.ts` : interface `AutoReplyMatcher`, un seul matcher mot-clé fourni. Ajouter un matcher IA (ex: Claude API) ici sans toucher au reste.

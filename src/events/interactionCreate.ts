@@ -3,6 +3,7 @@ import {
   ChannelSelectMenuBuilder,
   ChannelType,
   ModalBuilder,
+  PermissionFlagsBits,
   RoleSelectMenuBuilder,
   StringSelectMenuBuilder,
   TextInputBuilder,
@@ -129,6 +130,21 @@ async function isStaffInteraction(
 const NOT_STAFF_MESSAGE =
   "Tu n'as pas les droits suffisants pour cette action : elle est réservée aux gestionnaires de cette catégorie. " +
   "Demande à un administrateur de t'ajouter via le panneau (bouton Tickets → Ajouter un rôle de gestion).";
+
+/**
+ * Verifie la permission Discord native "Gerer le serveur" (ManageGuild), comme le fait deja
+ * `/config`. Contrairement aux autres boutons du panneau (qui ne s'appuient que sur la
+ * visibilite du salon panneau cote permissions Discord), les actions les plus sensibles du
+ * panneau "Monitoring" (jobId, role "en service", salons surveilles, webhooks sortants —
+ * ces derniers determinent qui reçoit en direct les donnees de l'entreprise) ont ce filet de
+ * securite supplementaire : une mauvaise configuration des permissions du salon panneau ne
+ * suffit alors plus a elle seule a exposer ces reglages a n'importe qui.
+ */
+function isGuildManager(interaction: ButtonInteraction): boolean {
+  return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
+}
+
+const NOT_GUILD_MANAGER_MESSAGE = "Tu n'as pas les droits suffisants pour cette action : elle est réservée aux membres avec la permission \"Gérer le serveur\".";
 
 /** Route une commande slash vers son `Command.execute`, avec gestion d'erreur generique commune a toutes les commandes. */
 async function handleChatInputCommand(interaction: Interaction): Promise<void> {
@@ -1427,6 +1443,10 @@ async function handleFaqRemoveRuleSelect(interaction: Interaction): Promise<void
 /** Clic sur "Définir l'entreprise (jobId)" : modal (texte libre, pas d'entite Discord a selectionner). */
 async function handlePanelMonitoringSetJobId(interaction: Interaction): Promise<void> {
   if (!interaction.isButton()) return;
+  if (!isGuildManager(interaction)) {
+    await interaction.reply({ content: NOT_GUILD_MANAGER_MESSAGE, ephemeral: true });
+    return;
+  }
 
   const modal = new ModalBuilder().setCustomId("panel:monitoring:set-job-id-modal").setTitle("Définir l'entreprise");
   const jobIdInput = new TextInputBuilder()
@@ -1450,6 +1470,10 @@ async function handleMonitoringSetJobIdModal(interaction: Interaction): Promise<
 /** Clic sur "Définir le rôle en service" : menu natif Discord (RoleSelectMenu). */
 async function handlePanelMonitoringSetOnDutyRole(interaction: Interaction): Promise<void> {
   if (!interaction.isButton()) return;
+  if (!isGuildManager(interaction)) {
+    await interaction.reply({ content: NOT_GUILD_MANAGER_MESSAGE, ephemeral: true });
+    return;
+  }
 
   const select = new RoleSelectMenuBuilder().setCustomId("panel:monitoring:set-on-duty-role-select").setPlaceholder("Choisir un rôle");
   const row = new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(select);
@@ -1468,6 +1492,10 @@ async function handleMonitoringSetOnDutyRoleSelect(interaction: Interaction): Pr
 /** Clic sur "Salon <type>" : menu natif Discord pour choisir le salon webhook a surveiller. */
 async function handlePanelMonitoringSetChannel(interaction: Interaction, type: MonitoringLogType): Promise<void> {
   if (!interaction.isButton()) return;
+  if (!isGuildManager(interaction)) {
+    await interaction.reply({ content: NOT_GUILD_MANAGER_MESSAGE, ephemeral: true });
+    return;
+  }
 
   const select = new ChannelSelectMenuBuilder()
     .setCustomId(`panel:monitoring:set-channel-select:${type}`)
@@ -1489,6 +1517,10 @@ async function handleMonitoringSetChannelSelect(interaction: Interaction, type: 
 /** Clic sur "Retirer salon <type>" : retire directement, un seul salon possible par type. */
 async function handlePanelMonitoringClearChannel(interaction: Interaction, type: MonitoringLogType): Promise<void> {
   if (!interaction.isButton() || !interaction.guildId || !interaction.channelId) return;
+  if (!isGuildManager(interaction)) {
+    await interaction.reply({ content: NOT_GUILD_MANAGER_MESSAGE, ephemeral: true });
+    return;
+  }
 
   await clearMonitoringChannel(interaction.guildId, type);
   await refreshMonitoringPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
@@ -1498,6 +1530,10 @@ async function handlePanelMonitoringClearChannel(interaction: Interaction, type:
 /** Clic sur "Ajouter un webhook" : d'abord choisir le type d'evenement concerne. */
 async function handlePanelMonitoringAddWebhook(interaction: Interaction): Promise<void> {
   if (!interaction.isButton()) return;
+  if (!isGuildManager(interaction)) {
+    await interaction.reply({ content: NOT_GUILD_MANAGER_MESSAGE, ephemeral: true });
+    return;
+  }
 
   const options = MONITORING_WEBHOOK_EVENT_TYPES.map((eventType) => {
     const type = eventType.replace("monitoring.", "").toUpperCase() as MonitoringLogType;
@@ -1540,6 +1576,10 @@ async function handleMonitoringAddWebhookModal(interaction: Interaction, eventTy
 /** Clic sur "Retirer un webhook" : menu natif des abonnements existants. */
 async function handlePanelMonitoringRemoveWebhook(interaction: Interaction): Promise<void> {
   if (!interaction.isButton() || !interaction.guildId) return;
+  if (!isGuildManager(interaction)) {
+    await interaction.reply({ content: NOT_GUILD_MANAGER_MESSAGE, ephemeral: true });
+    return;
+  }
 
   const subscriptions = await listSubscriptions(interaction.guildId);
   if (subscriptions.length === 0) {
