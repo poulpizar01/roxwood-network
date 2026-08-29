@@ -56,7 +56,11 @@ export async function dispatchWebhook(
 
   if (subscriptions.length === 0) return;
 
-  const body = JSON.stringify({ eventType, payload, sentAt: new Date().toISOString() });
+  // `guildId` est inclus explicitement dans le corps envoye : si le recepteur utilise la
+  // meme URL pour plusieurs guildes (plutot qu'une URL dediee par guilde), c'est le seul
+  // moyen pour lui de savoir de quel serveur Discord provient l'evenement — sans ca, rien
+  // dans la requete ne permettrait de les distinguer.
+  const body = JSON.stringify({ guildId, eventType, payload, sentAt: new Date().toISOString() });
 
   await Promise.all(
     subscriptions.map(async (sub) => {
