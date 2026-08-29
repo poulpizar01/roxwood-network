@@ -50,6 +50,7 @@ Aucun port n'est expose publiquement (le bot ne fait que des connexions sortante
 - **Recrutement** : bouton "Definir/Retirer la categorie", bouton "Ouvrir/Fermer les recrutements" (meme principe, libelle dynamique), et gestion des questions du formulaire de candidature (max 5, style texte court/long) — si aucune n'est configuree, repli automatique sur 5 questions par defaut (Nom RP, Age, Experience RP, Disponibilites, Motivation).
 - **Absences** : configuration du role approbateur et du salon de suivi des demandes (voir section Absences plus bas).
 - **FAQ** : gestion des regles de reponse automatique mot-cle -> reponse.
+- **Monitoring** : lecture des logs webhook du script FiveM (voir section Monitoring plus bas).
 
 Chaque message dedie (sauf le message racine) porte une reaction 🗑️ posee automatiquement : cliquer dessus le supprime et reinitialise sa reference en base — recliquer le bouton parent (racine, ou "Tickets" pour Service/Recrutement) le reposte tout neuf. Le message racine n'a jamais cette reaction : c'est le seul point d'entree vers tout le reste, il ne doit pas pouvoir etre supprime par erreur.
 
@@ -59,6 +60,7 @@ Chaque message dedie (sauf le message racine) porte une reaction 🗑️ posee a
 - `/config set-escalation-timeout <minutes>` — delai avant qu'un ticket sans reponse staff declenche une escalade (0 = desactive).
 - `/config set-recruitment-channel [channel]` — salon dedie ou poster le suivi des candidatures (recap + boutons), pour ne pas encombrer le salon du ticket partage avec le candidat. Sans salon configure, le recap est poste dans le salon du ticket lui-meme.
 - `/absence` — declare une absence (accessible a tout le monde, voir section Absences).
+- `/stock [coffre]` — consulte le stock d'un coffre d'entreprise, ou le stock total (accessible a tout le monde, voir section Monitoring).
 - `/ticket info` / `/ticket priority <level>` / `/ticket tag add|remove <tag>`.
 - `/stats overview` — tickets ouverts/fermes/escalades, temps de reponse moyen.
 
@@ -94,11 +96,30 @@ Panneau "Absences" → configurer le **role approbateur** et le **salon de suivi
 
 Panneau "FAQ" → "Ajouter une règle" (modal mot-clé/réponse) / "Retirer une règle". Declenchee quand le client ayant ouvert un ticket ecrit un message contenant le mot-cle (recherche simple, insensible a la casse).
 
+## Monitoring (logs webhook FiveM)
+
+Le script FiveM du serveur poste des logs d'activite en jeu (embeds webhook) dans des salons dedies : prise/fin de service, recrutements/licenciements, mouvements de coffre d'entreprise, factures, ventes. Le panneau "Monitoring" configure :
+
+- **Entreprise (jobId)** : chaque guilde ne surveille qu'**une seule entreprise** — tout log dont le `jobId` ne correspond pas est completement ignore (le serveur FiveM melange plusieurs entreprises dans les memes salons).
+- **Rôle "en service"** : ajoute au membre a la prise de service, retire a la fin de service.
+- **Un salon par type de log** (Prise de service / Recrutement / Coffre / Facture / Vente run) : bouton "Salon <type>" (libelle dynamique Definir/Retirer selon l'etat courant).
+- **Webhooks sortants** : "Ajouter un webhook" (choisir le type d'evenement → URL de destination) genere un secret affiche **une seule fois**, a noter pour verifier la signature HMAC-SHA256 (header `X-Signature-256`) cote recepteur — meme mecanisme que les webhooks `ticket.*` existants (voir Points d'extension).
+
+Effets automatiques :
+- **Prise de service** : bascule le role "en service" du membre concerne.
+- **Recrutement** (embauche uniquement) : si un ticket de candidature existe pour ce joueur (`Ticket.openerId` = `targetPlayerDiscord` du log), passe son statut a **Accepté** et met a jour le message de suivi. Licenciements et changements de grade sont journalises mais sans effet automatique pour l'instant.
+- **Coffre** : chaque depot/retrait alimente un ledger par coffre (identifie par sa position), interrogeable avec `/stock`.
+- **Facture / Vente run** : journalises pour les statistiques (montant, taxes, quantites) et relayes par webhook sortant — aucun effet automatique.
+
+Tout log recu (que le texte libre de sa description ait pu etre parse ou non) est conserve en base (`MonitoringEvent`) et jamais perdu — un format de description inattendu desactive juste l'effet automatique correspondant (avertissement logge), le reste continue de fonctionner.
+
 ## Points d'extension
 
 - `src/services/autoReplyService.ts` : interface `AutoReplyMatcher`, un seul matcher mot-cle fourni. Ajouter un matcher IA (ex: Claude API) ici sans toucher au reste.
-- `src/services/webhookDispatcher.ts` : webhooks sortants signes HMAC (header `X-Signature-256`) sur les evenements `ticket.created`, `ticket.closed`, `ticket.escalated` — point de branchement generique pour un CRM/site externe.
+- `src/services/webhookDispatcher.ts` : webhooks sortants signes HMAC (header `X-Signature-256`) sur les evenements `ticket.created`, `ticket.closed`, `ticket.escalated`, `monitoring.shift`, `monitoring.recruitment`, `monitoring.safe`, `monitoring.invoice`, `monitoring.sale` — point de branchement generique pour un CRM/site externe. Geres depuis le panneau "Monitoring" (aucun acces DB necessaire).
 
 ## A verifier sur le vrai serveur
 
 Le signal de fermeture de ticket differe selon la configuration Ticket Tool (suppression du canal, renommage avec un prefixe, ou deplacement de categorie). Le bot couvre la suppression (`channelDelete`) et un renommage avec prefixe `closed-`/`ferme-` (`channelUpdate`, voir `src/events/channelUpdate.ts`) — a ajuster une fois observe en conditions reelles.
+
+Le parsing des logs de Monitoring (`src/services/monitoringParsers.ts`) est base sur 5 exemples reels fournis par l'utilisateur, verifies au mot pres (voir tests inline dans l'historique de dev) — mais pas exhaustif de toutes les variantes possibles (ex: autres formulations de licenciement, autres types de log FiveM non captures). Si un log n'est pas reconnu, il est quand meme conserve brut (`MonitoringEvent`) et un avertissement est loggue : verifier les logs du bot en cas de log de Monitoring qui ne declenche pas l'effet attendu. De meme, l'identification d'un coffre par sa `targetPosition` (position fixe du coffre, distincte de la position du joueur) suppose que le meme coffre physique emet toujours exactement la meme valeur — a confirmer en conditions reelles.

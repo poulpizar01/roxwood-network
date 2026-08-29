@@ -9,7 +9,24 @@ import { logger } from "../utils/logger.js";
  */
 
 /** Types d'evenements pouvant declencher l'envoi d'un webhook. */
-export type WebhookEventType = "ticket.created" | "ticket.closed" | "ticket.escalated";
+export type WebhookEventType =
+  | "ticket.created"
+  | "ticket.closed"
+  | "ticket.escalated"
+  | "monitoring.shift"
+  | "monitoring.recruitment"
+  | "monitoring.safe"
+  | "monitoring.invoice"
+  | "monitoring.sale";
+
+/** Types d'evenements "monitoring.*" geres par le panneau (voir `panelService.buildMonitoringPanelRows`). */
+export const MONITORING_WEBHOOK_EVENT_TYPES: WebhookEventType[] = [
+  "monitoring.shift",
+  "monitoring.recruitment",
+  "monitoring.safe",
+  "monitoring.invoice",
+  "monitoring.sale",
+];
 
 /**
  * Signe le corps de la requete en HMAC-SHA256 avec le secret propre a chaque abonnement,

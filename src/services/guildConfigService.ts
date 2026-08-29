@@ -1,15 +1,26 @@
-import { Prisma, type GuildConfig, type TicketCategoryConfig, type TicketType } from "@prisma/client";
+import {
+  Prisma,
+  type GuildConfig,
+  type MonitoringChannelConfig,
+  type MonitoringLogType,
+  type TicketCategoryConfig,
+  type TicketType,
+} from "@prisma/client";
 import { prisma } from "../db/prisma.js";
 
 /**
  * Ce service centralise la lecture/ecriture de la configuration par serveur (`GuildConfig`)
- * et de son mapping categorie -> type de ticket + roles de gestion (`TicketCategoryConfig`).
+ * et de ses mappings associes : categorie -> type de ticket + roles de gestion
+ * (`TicketCategoryConfig`), salon -> type de log de monitoring (`MonitoringChannelConfig`).
  * Chaque fonction est scopee par `guildId`, ce qui garantit l'isolation multi-serveur : le
  * bot ne lit/ecrit jamais que les donnees du serveur sur lequel l'evenement/la commande a eu lieu.
  */
 
-/** GuildConfig avec ses categories de tickets deja chargees (evite un aller-retour DB supplementaire). */
-type GuildConfigWithCategories = GuildConfig & { ticketCategories: TicketCategoryConfig[] };
+/** GuildConfig avec ses categories de tickets et salons de monitoring deja charges (evite un aller-retour DB supplementaire). */
+type GuildConfigWithCategories = GuildConfig & {
+  ticketCategories: TicketCategoryConfig[];
+  monitoringChannels: MonitoringChannelConfig[];
+};
 
 /**
  * Cache memoire (process local) des configs par guilde, pour eviter une requete Postgres
@@ -28,7 +39,7 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfigWithCa
 
   const config = await prisma.guildConfig.findUnique({
     where: { guildId },
-    include: { ticketCategories: true },
+    include: { ticketCategories: true, monitoringChannels: true },
   });
   if (config) cache.set(guildId, config);
   return config;
@@ -57,7 +68,7 @@ async function ensureGuildConfig(guildId: string): Promise<GuildConfigWithCatego
       where: { guildId },
       create: { guildId },
       update: {},
-      include: { ticketCategories: true },
+      include: { ticketCategories: true, monitoringChannels: true },
     });
     cache.set(guildId, config);
     return config;
@@ -73,7 +84,7 @@ async function ensureGuildConfig(guildId: string): Promise<GuildConfigWithCatego
 async function refresh(guildId: string): Promise<GuildConfigWithCategories> {
   const config = await prisma.guildConfig.findUniqueOrThrow({
     where: { guildId },
-    include: { ticketCategories: true },
+    include: { ticketCategories: true, monitoringChannels: true },
   });
   cache.set(guildId, config);
   return config;
@@ -255,4 +266,46 @@ export function isTicketManager(
 export function isAbsenceApprover(config: GuildConfigWithCategories | null, memberRoleIds: string[]): boolean {
   if (!config?.absenceApproverRoleId) return false;
   return memberRoleIds.includes(config.absenceApproverRoleId);
+}
+
+/**
+ * Definit le jobId (cote script FiveM) sur lequel porte le monitoring de cette guilde — les
+ * logs d'autres entreprises passant par les memes salons webhook sont ignores.
+ */
+export async function setMonitoringJobId(guildId: string, jobId: string): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.guildConfig.update({ where: { guildId }, data: { monitoringJobId: jobId } });
+  return refresh(guildId);
+}
+
+/** Definit le role Discord ajoute a la prise de service, retire a la fin de service. */
+export async function setOnDutyRole(guildId: string, roleId: string): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.guildConfig.update({ where: { guildId }, data: { onDutyRoleId: roleId } });
+  return refresh(guildId);
+}
+
+/**
+ * Definit (ou redefinit) le salon webhook surveille pour un type de log de monitoring donne.
+ * Un seul salon par type et par guilde — meme simplification que `setCategoryForType`.
+ */
+export async function setMonitoringChannel(
+  guildId: string,
+  type: MonitoringLogType,
+  channelId: string
+): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.monitoringChannelConfig.upsert({
+    where: { guildId_type: { guildId, type } },
+    create: { guildId, type, channelId },
+    update: { channelId },
+  });
+  return refresh(guildId);
+}
+
+/** Retire le salon surveille pour un type de log de monitoring donne. */
+export async function clearMonitoringChannel(guildId: string, type: MonitoringLogType): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.monitoringChannelConfig.deleteMany({ where: { guildId, type } });
+  return refresh(guildId);
 }

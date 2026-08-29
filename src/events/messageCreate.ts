@@ -4,11 +4,17 @@ import { getTicketByChannel, recordActivity, recordFirstStaffReply } from "../se
 import { findAutoReply } from "../services/autoReplyService.js";
 import { addAttachment } from "../services/recruitmentService.js";
 import { refreshRecruitmentLogMessage } from "../services/recruitmentLogService.js";
+import { ingestMonitoringMessage } from "../services/monitoringService.js";
 import { logger } from "../utils/logger.js";
 
 /**
- * Handler de l'evenement `messageCreate`, restreint aux canaux qui sont des tickets suivis
- * et encore ouverts. Responsabilites :
+ * Handler de l'evenement `messageCreate`. Deux responsabilites bien separees :
+ *
+ * A. Si le salon est un salon de monitoring configure (logs webhook FiveM, voir
+ *    `monitoringService.ts`), le message y est entierement traite et le reste de ce handler
+ *    est court-circuite — un salon de monitoring n'est jamais un salon de ticket.
+ *
+ * B. Sinon, restreint aux canaux qui sont des tickets suivis et encore ouverts :
  * 1. supprimer les messages purement informatifs postes par d'autres bots pour garder le
  *    salon propre autour de notre propre intro — mais jamais un message qui porte un bouton
  *    ou un menu (typiquement le bouton "Close" de Ticket Tool) : impossible de simuler un
@@ -23,6 +29,8 @@ import { logger } from "../utils/logger.js";
  */
 export async function onMessageCreate(message: Message): Promise<void> {
   if (!message.inGuild()) return;
+
+  if (await ingestMonitoringMessage(message)) return;
 
   const ticket = await getTicketByChannel(message.channelId);
   if (!ticket || ticket.status !== "OPEN") return;

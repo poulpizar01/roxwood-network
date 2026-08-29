@@ -131,3 +131,15 @@ export async function getTicketById(ticketId: string) {
     where: { id: ticketId },
   });
 }
+
+/**
+ * Retrouve le ticket de candidature le plus recent ouvert par un Discord donne (utilise par
+ * le monitoring pour rattacher un log d'embauche externe (`targetPlayerDiscord`) a une
+ * candidature deja en cours, si elle existe — voir `monitoringService.ts`).
+ */
+export async function findLatestRecruitmentTicketByOpener(guildId: string, openerId: string) {
+  return prisma.ticket.findFirst({
+    where: { guildId, openerId, type: "RECRUITMENT" },
+    orderBy: { createdAt: "desc" },
+  });
+}

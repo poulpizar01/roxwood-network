@@ -45,6 +45,7 @@ import { ORDER_STATUS_CHOICES, orderStatusLabel, sendInvoiceForOrder, upsertOrde
 import {
   addCategoryManagerRole,
   clearCategoryForType,
+  clearMonitoringChannel,
   getGuildConfig,
   isAbsenceApprover,
   isTicketManager,
@@ -52,6 +53,9 @@ import {
   setAbsenceApproverRole,
   setAbsenceReviewChannel,
   setCategoryForType,
+  setMonitoringChannel,
+  setMonitoringJobId,
+  setOnDutyRole,
   setRecruitmentOpen,
 } from "../services/guildConfigService.js";
 import {
@@ -62,10 +66,13 @@ import {
 } from "../services/recruitmentQuestionService.js";
 import { addRule as addFaqRule, listRules as listFaqRules, removeRule as removeFaqRule } from "../services/autoReplyService.js";
 import {
+  MONITORING_TYPE_LABELS,
   buildAbsencesPanelEmbed,
   buildAbsencesPanelRows,
   buildFaqPanelEmbed,
   buildFaqPanelRows,
+  buildMonitoringPanelEmbed,
+  buildMonitoringPanelRows,
   buildRecruitmentPanelEmbed,
   buildRecruitmentPanelRows,
   buildServicePanelEmbed,
@@ -77,6 +84,9 @@ import {
 } from "../services/panelService.js";
 import { createAbsenceRequest, formatFrenchDate, getAbsenceRequest, parseFrenchDate, resolveAbsenceRequest } from "../services/absenceService.js";
 import { postAbsenceRequest, refreshAbsenceMessage } from "../services/absenceLogService.js";
+import { MONITORING_WEBHOOK_EVENT_TYPES, type WebhookEventType } from "../services/webhookDispatcher.js";
+import { createSubscription, listSubscriptions, removeSubscription } from "../services/webhookSubscriptionService.js";
+import type { MonitoringLogType } from "@prisma/client";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -643,7 +653,7 @@ async function handleOrderRemoveItemSelect(interaction: Interaction, ticketId: s
  * la Phase A ne pose qu'un message minimal ("bientot disponible") — leur contenu complet
  * (declaration d'absence, gestion FAQ) arrive dans une phase ulterieure.
  */
-async function handlePanelRootButton(interaction: Interaction, key: "TICKETS" | "ABSENCES" | "FAQ"): Promise<void> {
+async function handlePanelRootButton(interaction: Interaction, key: "TICKETS" | "ABSENCES" | "FAQ" | "MONITORING"): Promise<void> {
   if (!interaction.isButton() || !interaction.guildId || !interaction.channelId) return;
 
   await setPanelEnabled(interaction.guildId, key, true);
@@ -655,8 +665,10 @@ async function handlePanelRootButton(interaction: Interaction, key: "TICKETS" | 
     });
   } else if (key === "ABSENCES") {
     await refreshAbsencesPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
-  } else {
+  } else if (key === "FAQ") {
     await refreshFaqPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  } else {
+    await refreshMonitoringPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
   }
 
   await interaction.reply({ content: "Fonctionnalité activée, voir le message ci-dessus.", ephemeral: true });
@@ -1373,6 +1385,154 @@ async function handleFaqRemoveRuleSelect(interaction: Interaction): Promise<void
   await interaction.update({ content: "Règle retirée.", components: [] });
 }
 
+/** Recharge le message dedie "Monitoring" (embed + boutons) a partir de l'etat courant de la config. */
+async function refreshMonitoringPanelMessage(interaction: Interaction["client"], guildId: string, channelId: string): Promise<void> {
+  const config = await getGuildConfig(guildId);
+  await upsertPanelMessage(interaction, guildId, "MONITORING", channelId, {
+    embeds: [await buildMonitoringPanelEmbed(guildId)],
+    components: buildMonitoringPanelRows(config),
+  });
+}
+
+/** Clic sur "Définir l'entreprise (jobId)" : modal (texte libre, pas d'entite Discord a selectionner). */
+async function handlePanelMonitoringSetJobId(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton()) return;
+
+  const modal = new ModalBuilder().setCustomId("panel:monitoring:set-job-id-modal").setTitle("Définir l'entreprise");
+  const jobIdInput = new TextInputBuilder()
+    .setCustomId("jobId")
+    .setLabel("jobId (identifiant côté script FiveM)")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(jobIdInput));
+  await interaction.showModal(modal);
+}
+
+async function handleMonitoringSetJobIdModal(interaction: Interaction): Promise<void> {
+  if (!interaction.isModalSubmit() || !interaction.guildId || !interaction.channelId) return;
+
+  const jobId = interaction.fields.getTextInputValue("jobId").trim();
+  await setMonitoringJobId(interaction.guildId, jobId);
+  await refreshMonitoringPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.reply({ content: `Entreprise définie sur jobId \`${jobId}\`.`, ephemeral: true });
+}
+
+/** Clic sur "Définir le rôle en service" : menu natif Discord (RoleSelectMenu). */
+async function handlePanelMonitoringSetOnDutyRole(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton()) return;
+
+  const select = new RoleSelectMenuBuilder().setCustomId("panel:monitoring:set-on-duty-role-select").setPlaceholder("Choisir un rôle");
+  const row = new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(select);
+  await interaction.reply({ components: [row], ephemeral: true });
+}
+
+async function handleMonitoringSetOnDutyRoleSelect(interaction: Interaction): Promise<void> {
+  if (!interaction.isRoleSelectMenu() || !interaction.guildId || !interaction.channelId) return;
+
+  const roleId = interaction.values[0];
+  await setOnDutyRole(interaction.guildId, roleId);
+  await refreshMonitoringPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.update({ content: `Rôle "en service" défini sur <@&${roleId}>.`, components: [] });
+}
+
+/** Clic sur "Salon <type>" : menu natif Discord pour choisir le salon webhook a surveiller. */
+async function handlePanelMonitoringSetChannel(interaction: Interaction, type: MonitoringLogType): Promise<void> {
+  if (!interaction.isButton()) return;
+
+  const select = new ChannelSelectMenuBuilder()
+    .setCustomId(`panel:monitoring:set-channel-select:${type}`)
+    .setPlaceholder("Choisir un salon")
+    .addChannelTypes(ChannelType.GuildText);
+  const row = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(select);
+  await interaction.reply({ components: [row], ephemeral: true });
+}
+
+async function handleMonitoringSetChannelSelect(interaction: Interaction, type: MonitoringLogType): Promise<void> {
+  if (!interaction.isChannelSelectMenu() || !interaction.guildId || !interaction.channelId) return;
+
+  const channelId = interaction.values[0];
+  await setMonitoringChannel(interaction.guildId, type, channelId);
+  await refreshMonitoringPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.update({ content: `Salon ${MONITORING_TYPE_LABELS[type]} défini sur <#${channelId}>.`, components: [] });
+}
+
+/** Clic sur "Retirer salon <type>" : retire directement, un seul salon possible par type. */
+async function handlePanelMonitoringClearChannel(interaction: Interaction, type: MonitoringLogType): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId || !interaction.channelId) return;
+
+  await clearMonitoringChannel(interaction.guildId, type);
+  await refreshMonitoringPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.reply({ content: `Salon ${MONITORING_TYPE_LABELS[type]} retiré.`, ephemeral: true });
+}
+
+/** Clic sur "Ajouter un webhook" : d'abord choisir le type d'evenement concerne. */
+async function handlePanelMonitoringAddWebhook(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton()) return;
+
+  const options = MONITORING_WEBHOOK_EVENT_TYPES.map((eventType) => {
+    const type = eventType.replace("monitoring.", "").toUpperCase() as MonitoringLogType;
+    return { label: MONITORING_TYPE_LABELS[type], value: eventType };
+  });
+  const select = new StringSelectMenuBuilder().setCustomId("panel:monitoring:add-webhook-type").setPlaceholder("Choisir un type").addOptions(options);
+  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+  await interaction.reply({ components: [row], ephemeral: true });
+}
+
+/** Type choisi : modal pour l'URL de destination. */
+async function handleMonitoringAddWebhookType(interaction: Interaction): Promise<void> {
+  if (!interaction.isStringSelectMenu()) return;
+
+  const eventType = interaction.values[0];
+  const modal = new ModalBuilder().setCustomId(`panel:monitoring:add-webhook-modal:${eventType}`).setTitle("Ajouter un webhook");
+  const urlInput = new TextInputBuilder().setCustomId("url").setLabel("URL de destination").setStyle(TextInputStyle.Short).setRequired(true);
+  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(urlInput));
+  await interaction.showModal(modal);
+}
+
+/**
+ * Soumission de l'URL : cree l'abonnement et affiche le secret en clair — dernière fois qu'il
+ * sera visible, il sert a l'externe pour verifier la signature HMAC des POST recus.
+ */
+async function handleMonitoringAddWebhookModal(interaction: Interaction, eventType: string): Promise<void> {
+  if (!interaction.isModalSubmit() || !interaction.guildId || !interaction.channelId) return;
+
+  const url = interaction.fields.getTextInputValue("url").trim();
+  const { secret } = await createSubscription(interaction.guildId, eventType as WebhookEventType, url);
+  await refreshMonitoringPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.reply({
+    content:
+      `Webhook \`${eventType}\` ajouté vers ${url}.\n` +
+      `Secret de signature (header \`X-Signature-256\`, HMAC-SHA256) — **note-le, il ne sera plus jamais affiché** :\n\`${secret}\``,
+    ephemeral: true,
+  });
+}
+
+/** Clic sur "Retirer un webhook" : menu natif des abonnements existants. */
+async function handlePanelMonitoringRemoveWebhook(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId) return;
+
+  const subscriptions = await listSubscriptions(interaction.guildId);
+  if (subscriptions.length === 0) {
+    await interaction.reply({ content: "Aucun webhook configuré.", ephemeral: true });
+    return;
+  }
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("panel:monitoring:remove-webhook-select")
+    .setPlaceholder("Choisir un webhook à retirer")
+    .addOptions(subscriptions.slice(0, 25).map((s) => ({ label: `${s.eventType} — ${s.url}`.slice(0, 100), value: s.id })));
+  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+  await interaction.reply({ components: [row], ephemeral: true });
+}
+
+async function handleMonitoringRemoveWebhookSelect(interaction: Interaction): Promise<void> {
+  if (!interaction.isStringSelectMenu() || !interaction.guildId || !interaction.channelId) return;
+
+  await removeSubscription(interaction.guildId, interaction.values[0]);
+  await refreshMonitoringPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.update({ content: "Webhook retiré.", components: [] });
+}
+
 /**
  * Handler de l'evenement `interactionCreate`. Aiguille par type d'interaction puis par
  * `customId` vers le handler correspondant ci-dessus. Les customId parametres (contenant
@@ -1421,6 +1581,7 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:root:tickets") return await handlePanelRootButton(interaction, "TICKETS");
       if (interaction.customId === "panel:root:absences") return await handlePanelRootButton(interaction, "ABSENCES");
       if (interaction.customId === "panel:root:faq") return await handlePanelRootButton(interaction, "FAQ");
+      if (interaction.customId === "panel:root:monitoring") return await handlePanelRootButton(interaction, "MONITORING");
       if (interaction.customId === "panel:tickets:service") return await handlePanelTicketsNested(interaction, "SERVICE");
       if (interaction.customId === "panel:tickets:recruitment") return await handlePanelTicketsNested(interaction, "RECRUITMENT");
       if (interaction.customId === "panel:tickets:add-role") return await handlePanelTicketsAddRole(interaction);
@@ -1447,6 +1608,22 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:recruitment:remove-question") return await handlePanelRecruitmentRemoveQuestion(interaction);
       if (interaction.customId === "panel:faq:add-rule") return await handlePanelFaqAddRule(interaction);
       if (interaction.customId === "panel:faq:remove-rule") return await handlePanelFaqRemoveRule(interaction);
+      if (interaction.customId === "panel:monitoring:set-job-id") return await handlePanelMonitoringSetJobId(interaction);
+      if (interaction.customId === "panel:monitoring:set-on-duty-role") return await handlePanelMonitoringSetOnDutyRole(interaction);
+      if (interaction.customId.startsWith("panel:monitoring:set-channel:")) {
+        return await handlePanelMonitoringSetChannel(
+          interaction,
+          interaction.customId.slice("panel:monitoring:set-channel:".length) as MonitoringLogType
+        );
+      }
+      if (interaction.customId.startsWith("panel:monitoring:clear-channel:")) {
+        return await handlePanelMonitoringClearChannel(
+          interaction,
+          interaction.customId.slice("panel:monitoring:clear-channel:".length) as MonitoringLogType
+        );
+      }
+      if (interaction.customId === "panel:monitoring:add-webhook") return await handlePanelMonitoringAddWebhook(interaction);
+      if (interaction.customId === "panel:monitoring:remove-webhook") return await handlePanelMonitoringRemoveWebhook(interaction);
       return;
     }
 
@@ -1454,6 +1631,12 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:service:set-category-select") return await handleServiceSetCategorySelect(interaction);
       if (interaction.customId === "panel:recruitment:set-category-select") return await handleRecruitmentSetCategorySelect(interaction);
       if (interaction.customId === "panel:absences:set-review-channel-select") return await handlePanelAbsencesSetReviewChannelSelect(interaction);
+      if (interaction.customId.startsWith("panel:monitoring:set-channel-select:")) {
+        return await handleMonitoringSetChannelSelect(
+          interaction,
+          interaction.customId.slice("panel:monitoring:set-channel-select:".length) as MonitoringLogType
+        );
+      }
       return;
     }
 
@@ -1462,6 +1645,7 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
         return await handlePanelTicketsAddRoleSelect(interaction, interaction.customId.slice("panel:tickets:add-role-select:".length));
       }
       if (interaction.customId === "panel:absences:set-approver-role-select") return await handlePanelAbsencesSetApproverRoleSelect(interaction);
+      if (interaction.customId === "panel:monitoring:set-on-duty-role-select") return await handleMonitoringSetOnDutyRoleSelect(interaction);
       return;
     }
 
@@ -1492,6 +1676,8 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:recruitment:add-question-style") return await handleRecruitmentAddQuestionStyle(interaction);
       if (interaction.customId === "panel:recruitment:remove-question-select") return await handleRecruitmentRemoveQuestionSelect(interaction);
       if (interaction.customId === "panel:faq:remove-rule-select") return await handleFaqRemoveRuleSelect(interaction);
+      if (interaction.customId === "panel:monitoring:add-webhook-type") return await handleMonitoringAddWebhookType(interaction);
+      if (interaction.customId === "panel:monitoring:remove-webhook-select") return await handleMonitoringRemoveWebhookSelect(interaction);
       return;
     }
 
@@ -1507,6 +1693,10 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
         return await handleRecruitmentAddQuestionModal(interaction, interaction.customId.slice("panel:recruitment:add-question-modal:".length));
       }
       if (interaction.customId === "panel:faq:add-rule-modal") return await handleFaqAddRuleModal(interaction);
+      if (interaction.customId === "panel:monitoring:set-job-id-modal") return await handleMonitoringSetJobIdModal(interaction);
+      if (interaction.customId.startsWith("panel:monitoring:add-webhook-modal:")) {
+        return await handleMonitoringAddWebhookModal(interaction, interaction.customId.slice("panel:monitoring:add-webhook-modal:".length));
+      }
       if (interaction.customId.startsWith("order:submit-item:")) {
         const catalogItemId = interaction.customId.slice("order:submit-item:".length);
         return await handleOrderSubmitItem(interaction, catalogItemId);

@@ -1,10 +1,11 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Client } from "discord.js";
-import type { PanelMessageKey } from "@prisma/client";
+import type { MonitoringLogType, PanelMessageKey } from "@prisma/client";
 import { prisma } from "../db/prisma.js";
 import { getGuildConfig } from "./guildConfigService.js";
 import { listActiveWithFields } from "./catalogService.js";
 import { listQuestions } from "./recruitmentQuestionService.js";
 import { listRules } from "./autoReplyService.js";
+import { listSubscriptions } from "./webhookSubscriptionService.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -105,7 +106,8 @@ export function buildRootPanelRow(): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("panel:root:tickets").setLabel("Tickets").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("panel:root:absences").setLabel("Absences").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("panel:root:faq").setLabel("FAQ").setStyle(ButtonStyle.Primary)
+    new ButtonBuilder().setCustomId("panel:root:faq").setLabel("FAQ").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("panel:root:monitoring").setLabel("Monitoring").setStyle(ButtonStyle.Primary)
   );
 }
 
@@ -318,4 +320,75 @@ export function buildFaqPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
     new ButtonBuilder().setCustomId("panel:faq:remove-rule").setLabel("Retirer une règle").setStyle(ButtonStyle.Danger)
   );
   return [row];
+}
+
+/** Libelle affichable de chaque type de log de monitoring (boutons, embeds, menus). */
+export const MONITORING_TYPE_LABELS: Record<MonitoringLogType, string> = {
+  SHIFT: "Prise de service",
+  RECRUITMENT: "Recrutement",
+  SAFE: "Coffre",
+  INVOICE: "Facture",
+  SALE: "Vente run",
+};
+
+/**
+ * Embed du message dedie "Monitoring" : jobId surveille, role "en service", salon configure
+ * pour chaque type de log, et abonnements webhook sortants actifs.
+ */
+export async function buildMonitoringPanelEmbed(guildId: string): Promise<EmbedBuilder> {
+  const config = await getGuildConfig(guildId);
+  const subscriptions = await listSubscriptions(guildId);
+
+  const channelsText = (Object.keys(MONITORING_TYPE_LABELS) as MonitoringLogType[])
+    .map((type) => {
+      const channel = config?.monitoringChannels.find((c) => c.type === type);
+      return `${MONITORING_TYPE_LABELS[type]} : ${channel ? `<#${channel.channelId}>` : "Non configuré"}`;
+    })
+    .join("\n");
+
+  const webhooksText = subscriptions.length
+    ? subscriptions.map((s) => `\`${s.eventType}\` → ${s.url.slice(0, 60)} (${s.enabled ? "actif" : "inactif"})`).join("\n")
+    : "Aucun webhook configuré.";
+
+  return new EmbedBuilder()
+    .setTitle("Monitoring")
+    .setColor(0x5865f2)
+    .addFields(
+      { name: "Entreprise (jobId)", value: config?.monitoringJobId ?? "Non configuré", inline: true },
+      { name: "Rôle \"en service\"", value: config?.onDutyRoleId ? `<@&${config.onDutyRoleId}>` : "Non configuré", inline: true },
+      { name: "Salons surveillés", value: channelsText },
+      { name: "Webhooks sortants", value: webhooksText }
+    );
+}
+
+/**
+ * Boutons du message dedie "Monitoring" : jobId (modal), role "en service" (RoleSelectMenu),
+ * un bouton par type de log (libelle dynamique Definir/Retirer selon l'etat courant — meme
+ * convention que les categories Service/Recrutement), et gestion des webhooks sortants.
+ */
+export function buildMonitoringPanelRows(config: { monitoringChannels: { type: MonitoringLogType }[] } | null): ActionRowBuilder<ButtonBuilder>[] {
+  const configuredTypes = new Set(config?.monitoringChannels.map((c) => c.type) ?? []);
+  const types = Object.keys(MONITORING_TYPE_LABELS) as MonitoringLogType[];
+
+  const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("panel:monitoring:set-job-id").setLabel("Définir l'entreprise (jobId)").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("panel:monitoring:set-on-duty-role").setLabel("Définir le rôle \"en service\"").setStyle(ButtonStyle.Secondary)
+  );
+
+  const channelButtons = types.map((type) => {
+    const configured = configuredTypes.has(type);
+    return new ButtonBuilder()
+      .setCustomId(configured ? `panel:monitoring:clear-channel:${type}` : `panel:monitoring:set-channel:${type}`)
+      .setLabel(configured ? `Retirer salon ${MONITORING_TYPE_LABELS[type]}` : `Salon ${MONITORING_TYPE_LABELS[type]}`)
+      .setStyle(configured ? ButtonStyle.Danger : ButtonStyle.Success);
+  });
+  // Un ActionRow accepte au plus 5 boutons ; 5 types tiennent sur une seule ligne.
+  const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(...channelButtons);
+
+  const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("panel:monitoring:add-webhook").setLabel("Ajouter un webhook").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("panel:monitoring:remove-webhook").setLabel("Retirer un webhook").setStyle(ButtonStyle.Danger)
+  );
+
+  return [row1, row2, row3];
 }

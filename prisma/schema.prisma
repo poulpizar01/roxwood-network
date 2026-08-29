@@ -32,6 +32,13 @@ model GuildConfig {
   /// Salon dedie ou sont postees les demandes d'absence pour validation staff — separe du
   /// salon panneau, meme logique que `recruitmentLogChannelId`. `null` = pas configure.
   absenceReviewChannelId String?
+  /// jobId (cote script FiveM) sur lequel porte le monitoring de cette guilde. Les logs
+  /// d'autres entreprises passant par les memes salons webhook (serveur FiveM partage entre
+  /// plusieurs entreprises/Discords) sont completement ignores. `null` = monitoring pas
+  /// configure, aucun log traite.
+  monitoringJobId String?
+  /// Role Discord ajoute a la prise de service, retire a la fin de service.
+  onDutyRoleId    String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -43,6 +50,9 @@ model GuildConfig {
   panelMessages        PanelMessage[]
   absenceRequests      AbsenceRequest[]
   recruitmentQuestions RecruitmentQuestion[]
+  monitoringChannels   MonitoringChannelConfig[]
+  monitoringEvents     MonitoringEvent[]
+  monitoringSafes      MonitoringSafe[]
 }
 
 /// Associe une categorie Discord a un type de ticket ET a ses roles de gestion. Une categorie
@@ -391,6 +401,7 @@ enum PanelMessageKey {
   RECRUITMENT
   ABSENCES
   FAQ
+  MONITORING
 }
 
 /// Demande d'absence declaree par un membre via le panneau ("Absences" -> "Declarer une
@@ -423,4 +434,87 @@ enum AbsenceStatus {
   PENDING
   ACCEPTED
   REFUSED
+}
+
+/// Salon webhook a surveiller pour un type de log FiveM donne (voir MonitoringLogType). Un
+/// seul salon par type et par guilde — meme simplification que les categories de ticket
+/// (setCategoryForType) : pas de sens metier a en avoir plusieurs pour un meme type.
+model MonitoringChannelConfig {
+  id        String            @id @default(cuid())
+  guildId   String
+  type      MonitoringLogType
+  channelId String
+
+  guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
+
+  @@unique([guildId, type])
+}
+
+/// Types de logs webhook FiveM surveilles par le monitoring.
+enum MonitoringLogType {
+  /// Prise/fin de service.
+  SHIFT
+  /// Embauche/licenciement/changement de grade.
+  RECRUITMENT
+  /// Depot/retrait dans un coffre d'entreprise.
+  SAFE
+  /// Paiement de facture.
+  INVOICE
+  /// Vente de ressource.
+  SALE
+}
+
+/// Journal brut de chaque log de monitoring ingere (apres filtrage par jobId). Sert (a)
+/// d'audit/rejeu si un parsing specifique echoue ou evolue, (b) de source pour les stats
+/// (factures/ventes), (c) de payload pour le webhook sortant correspondant (voir
+/// webhookDispatcher.ts, evenements "monitoring.*").
+model MonitoringEvent {
+  id        String            @id @default(cuid())
+  guildId   String
+  type      MonitoringLogType
+  /// Champs bruts de l'embed + resultat du parsing specifique au type (direction, montant,
+  /// quantite...), fusionnes dans un seul objet. Volume attendu trop faible pour justifier
+  /// des colonnes dediees/agregation cote DB : les stats sont calculees en memoire a la demande.
+  rawFields Json
+  createdAt DateTime          @default(now())
+
+  guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
+
+  @@index([guildId, type, createdAt])
+}
+
+/// Un coffre physique d'entreprise, identifie par la position stable du coffre lui-meme
+/// (`targetPosition` du log SAFE, pas `position` qui est celle du joueur au moment de
+/// l'action). Assomption a verifier en conditions reelles : le meme coffre physique emet-il
+/// toujours exactement la meme `targetPosition` ?
+model MonitoringSafe {
+  id          String  @id @default(cuid())
+  guildId     String
+  positionKey String
+  /// Libelle optionnel donne par le staff pour retrouver facilement un coffre dans `/stock`
+  /// (sinon affiche par sa position brute).
+  label       String?
+
+  guildConfig GuildConfig              @relation(fields: [guildId], references: [guildId])
+  movements   MonitoringSafeMovement[]
+
+  @@unique([guildId, positionKey])
+}
+
+/// Un mouvement (depot ou retrait) sur un coffre. Le stock courant = somme des `quantity`
+/// groupee par (safeId, itemId) — ledger append-only plutot qu'un compteur mutable, pour
+/// garder l'historique complet et pouvoir recalculer/auditer.
+model MonitoringSafeMovement {
+  id              String   @id @default(cuid())
+  safeId          String
+  itemId          String
+  /// Positif = depot, negatif = retrait.
+  quantity        Int
+  playerDiscordId String?
+  playerName      String?
+  createdAt       DateTime @default(now())
+
+  safe MonitoringSafe @relation(fields: [safeId], references: [id], onDelete: Cascade)
+
+  @@index([safeId, itemId])
 }
