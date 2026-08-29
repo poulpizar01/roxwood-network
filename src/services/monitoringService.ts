@@ -54,36 +54,43 @@ export async function ingestMonitoringMessage(message: Message<true>): Promise<b
     const channelConfig = config.monitoringChannels.find((c) => c.channelId === message.channelId);
     if (!channelConfig) return false;
 
-    const embed = message.embeds[0];
-    if (!embed) return false;
+    if (message.embeds.length === 0) return false;
 
-    const description = embed.description ?? "";
-    const fields = Object.fromEntries(embed.fields.map((f) => [f.name, f.value]));
+    // Le webhook FiveM peut regrouper plusieurs evenements (ex: fin de service + prise de
+    // service consecutives) dans un seul message Discord portant plusieurs embeds — il faut
+    // donc tous les traiter, pas seulement le premier (`message.embeds[0]`), sous peine de
+    // perdre silencieusement les evenements suivants et de desynchroniser les effets de bord
+    // (ex: le role "en service" se retrouve retire par le dernier embed traite au lieu du
+    // dernier evenement reellement survenu).
+    for (const embed of message.embeds) {
+      const description = embed.description ?? "";
+      const fields = Object.fromEntries(embed.fields.map((f) => [f.name, f.value]));
 
-    if (fields.jobId !== config.monitoringJobId) return false;
+      if (fields.jobId !== config.monitoringJobId) continue;
 
-    const parsed = parseByType(channelConfig.type, description);
-    if (!parsed) {
-      logger.warn(`Log de monitoring ${channelConfig.type} non reconnu (guilde ${message.guildId}) : "${description}"`);
+      const parsed = parseByType(channelConfig.type, description);
+      if (!parsed) {
+        logger.warn(`Log de monitoring ${channelConfig.type} non reconnu (guilde ${message.guildId}) : "${description}"`);
+      }
+
+      await prisma.monitoringEvent.create({
+        data: {
+          guildId: message.guildId,
+          type: channelConfig.type,
+          rawFields: { ...fields, description, parsed: parsed ?? null },
+        },
+      });
+
+      if (parsed) {
+        await applySideEffect(message, config, channelConfig.type, fields, parsed);
+      }
+
+      await dispatchWebhook(message.guildId, WEBHOOK_EVENT_BY_TYPE[channelConfig.type], {
+        ...fields,
+        description,
+        parsed: parsed ?? null,
+      });
     }
-
-    await prisma.monitoringEvent.create({
-      data: {
-        guildId: message.guildId,
-        type: channelConfig.type,
-        rawFields: { ...fields, description, parsed: parsed ?? null },
-      },
-    });
-
-    if (parsed) {
-      await applySideEffect(message, config, channelConfig.type, fields, parsed);
-    }
-
-    await dispatchWebhook(message.guildId, WEBHOOK_EVENT_BY_TYPE[channelConfig.type], {
-      ...fields,
-      description,
-      parsed: parsed ?? null,
-    });
 
     return true;
   } catch (error) {
@@ -126,6 +133,9 @@ async function applySideEffect(
       const member = await message.guild.members.fetch(fields.playerDiscord);
       if (shift.direction === "in") await member.roles.add(config.onDutyRoleId);
       else await member.roles.remove(config.onDutyRoleId);
+      logger.info(
+        `Role "en service" ${shift.direction === "in" ? "ajoute a" : "retire de"} ${fields.playerDiscord} (guilde ${message.guildId})`
+      );
     } catch (error) {
       logger.warn(`Echec de bascule du role "en service" pour ${fields.playerDiscord}`, error);
     }
