@@ -67,20 +67,13 @@ import {
 import { addRule as addFaqRule, listRules as listFaqRules, removeRule as removeFaqRule } from "../services/autoReplyService.js";
 import {
   MONITORING_TYPE_LABELS,
-  buildAbsencesPanelEmbed,
-  buildAbsencesPanelRows,
-  buildFaqPanelEmbed,
-  buildFaqPanelRows,
-  buildMonitoringPanelEmbed,
-  buildMonitoringPanelRows,
-  buildRecruitmentPanelEmbed,
-  buildRecruitmentPanelRows,
-  buildServicePanelEmbed,
-  buildServicePanelRows,
-  buildTicketsPanelEmbed,
-  buildTicketsPanelRows,
+  refreshAbsencesPanelMessage,
+  refreshFaqPanelMessage,
+  refreshMonitoringPanelMessage,
+  refreshRecruitmentPanelMessage,
+  refreshServicePanelMessage,
+  refreshTicketsPanelMessage,
   setPanelEnabled,
-  upsertPanelMessage,
 } from "../services/panelService.js";
 import { createAbsenceRequest, formatFrenchDate, getAbsenceRequest, parseFrenchDate, resolveAbsenceRequest } from "../services/absenceService.js";
 import { postAbsenceRequest, refreshAbsenceMessage } from "../services/absenceLogService.js";
@@ -659,10 +652,7 @@ async function handlePanelRootButton(interaction: Interaction, key: "TICKETS" | 
   await setPanelEnabled(interaction.guildId, key, true);
 
   if (key === "TICKETS") {
-    await upsertPanelMessage(interaction.client, interaction.guildId, "TICKETS", interaction.channelId, {
-      embeds: [await buildTicketsPanelEmbed(interaction.guildId)],
-      components: buildTicketsPanelRows(),
-    });
+    await refreshTicketsPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
   } else if (key === "ABSENCES") {
     await refreshAbsencesPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
   } else if (key === "FAQ") {
@@ -735,10 +725,7 @@ async function handlePanelTicketsAddRoleSelect(interaction: Interaction, categor
 
   const roleId = interaction.values[0];
   await addCategoryManagerRole(interaction.guildId, categoryId, roleId);
-  await upsertPanelMessage(interaction.client, interaction.guildId, "TICKETS", interaction.channelId, {
-    embeds: [await buildTicketsPanelEmbed(interaction.guildId)],
-    components: buildTicketsPanelRows(),
-  });
+  await refreshTicketsPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
 
   await interaction.update({ content: `Rôle <@&${roleId}> ajouté comme gestionnaire.`, components: [] });
 }
@@ -803,20 +790,9 @@ async function handlePanelTicketsRemoveRoleSelect(interaction: Interaction, cate
 
   const roleId = interaction.values[0];
   await removeCategoryManagerRole(interaction.guildId, categoryId, roleId);
-  await upsertPanelMessage(interaction.client, interaction.guildId, "TICKETS", interaction.channelId, {
-    embeds: [await buildTicketsPanelEmbed(interaction.guildId)],
-    components: buildTicketsPanelRows(),
-  });
+  await refreshTicketsPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
 
   await interaction.update({ content: "Rôle retiré.", components: [] });
-}
-
-/** Recharge le message dedie "Absences" (embed + boutons de config) a partir de l'etat courant de la config. */
-async function refreshAbsencesPanelMessage(interaction: Interaction["client"], guildId: string, channelId: string): Promise<void> {
-  await upsertPanelMessage(interaction, guildId, "ABSENCES", channelId, {
-    embeds: [await buildAbsencesPanelEmbed(guildId)],
-    components: buildAbsencesPanelRows(),
-  });
 }
 
 /**
@@ -919,16 +895,6 @@ async function handleAbsenceResolve(interaction: Interaction, requestId: string,
   await resolveAbsenceRequest(requestId, interaction.user.id, status);
   await refreshAbsenceMessage(interaction.client, requestId);
   await interaction.reply({ content: status === "ACCEPTED" ? "Demande acceptée." : "Demande refusée.", ephemeral: true });
-}
-
-/** Recharge le message dedie "Service client" (embed + boutons) a partir de l'etat courant du catalogue. */
-async function refreshServicePanelMessage(interaction: Interaction["client"], guildId: string, channelId: string): Promise<void> {
-  const config = await getGuildConfig(guildId);
-  const categoryId = config?.ticketCategories.find((c) => c.type === "SERVICE")?.categoryId ?? null;
-  await upsertPanelMessage(interaction, guildId, "SERVICE", channelId, {
-    embeds: [await buildServicePanelEmbed(guildId)],
-    components: buildServicePanelRows(categoryId),
-  });
 }
 
 /** Clic sur "Définir la catégorie" (Service client) : menu natif Discord pour choisir la catégorie. */
@@ -1198,16 +1164,6 @@ async function handleServiceRemoveFieldSelect(interaction: Interaction): Promise
   await interaction.update({ content: "Champ retiré.", components: [] });
 }
 
-/** Recharge le message dedie "Recrutement" (embed + boutons) a partir de l'etat courant de la config. */
-async function refreshRecruitmentPanelMessage(interaction: Interaction["client"], guildId: string, channelId: string): Promise<void> {
-  const config = await getGuildConfig(guildId);
-  const categoryId = config?.ticketCategories.find((c) => c.type === "RECRUITMENT")?.categoryId ?? null;
-  await upsertPanelMessage(interaction, guildId, "RECRUITMENT", channelId, {
-    embeds: [await buildRecruitmentPanelEmbed(guildId)],
-    components: buildRecruitmentPanelRows(config?.recruitmentOpen ?? true, categoryId),
-  });
-}
-
 /** Clic sur "Définir la catégorie" (Recrutement) : menu natif Discord pour choisir la catégorie. */
 async function handlePanelRecruitmentSetCategory(interaction: Interaction): Promise<void> {
   if (!interaction.isButton()) return;
@@ -1322,13 +1278,6 @@ async function handleRecruitmentRemoveQuestionSelect(interaction: Interaction): 
   await interaction.update({ content: "Question retirée.", components: [] });
 }
 
-/** Recharge le message dedie "FAQ" (embed + boutons) a partir de l'etat courant des regles. */
-async function refreshFaqPanelMessage(interaction: Interaction["client"], guildId: string, channelId: string): Promise<void> {
-  await upsertPanelMessage(interaction, guildId, "FAQ", channelId, {
-    embeds: [await buildFaqPanelEmbed(guildId)],
-    components: buildFaqPanelRows(),
-  });
-}
 
 /** Clic sur "Ajouter une règle" : modal (mot-clé, réponse). */
 async function handlePanelFaqAddRule(interaction: Interaction): Promise<void> {
@@ -1383,15 +1332,6 @@ async function handleFaqRemoveRuleSelect(interaction: Interaction): Promise<void
   await removeFaqRule(interaction.guildId, interaction.values[0]);
   await refreshFaqPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
   await interaction.update({ content: "Règle retirée.", components: [] });
-}
-
-/** Recharge le message dedie "Monitoring" (embed + boutons) a partir de l'etat courant de la config. */
-async function refreshMonitoringPanelMessage(interaction: Interaction["client"], guildId: string, channelId: string): Promise<void> {
-  const config = await getGuildConfig(guildId);
-  await upsertPanelMessage(interaction, guildId, "MONITORING", channelId, {
-    embeds: [await buildMonitoringPanelEmbed(guildId)],
-    components: buildMonitoringPanelRows(config),
-  });
 }
 
 /** Clic sur "Définir l'entreprise (jobId)" : modal (texte libre, pas d'entite Discord a selectionner). */

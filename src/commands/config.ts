@@ -1,7 +1,7 @@
 import { PermissionFlagsBits, SlashCommandBuilder, ChannelType } from "discord.js";
 import type { Command } from "./types.js";
 import { setEscalationMinutes, setRecruitmentLogChannel, setPanelChannel } from "../services/guildConfigService.js";
-import { buildRootPanelEmbed, buildRootPanelRow, upsertPanelMessage } from "../services/panelService.js";
+import { refreshRootPanelMessage } from "../services/panelService.js";
 
 /**
  * `/config` : commande d'administration (reservee `ManageGuild`). La majorite des reglages
@@ -59,10 +59,7 @@ export const configCommand: Command = {
     if (sub === "set-panel-channel") {
       const channel = interaction.options.getChannel("channel", true);
       await setPanelChannel(interaction.guildId, channel.id);
-      await upsertPanelMessage(interaction.client, interaction.guildId, "ROOT", channel.id, {
-        embeds: [buildRootPanelEmbed()],
-        components: [buildRootPanelRow()],
-      });
+      await refreshRootPanelMessage(interaction.client, interaction.guildId, channel.id);
       await interaction.reply({ content: `Panneau d'administration installé dans <#${channel.id}>.`, ephemeral: true });
       return;
     }

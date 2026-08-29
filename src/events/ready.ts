@@ -2,11 +2,13 @@ import { REST, Routes, type Client } from "discord.js";
 import { env } from "../config/env.js";
 import { commands } from "../commands/index.js";
 import { startEscalationJob } from "../services/escalationService.js";
+import { refreshAllPanelsAcrossGuilds } from "../services/panelService.js";
 import { logger } from "../utils/logger.js";
 
 /**
  * Handler `ClientReady`, declenche une seule fois quand le bot est connecte a la gateway.
- * Enregistre les commandes slash aupres de l'API Discord, puis demarre le job d'escalade.
+ * Enregistre les commandes slash aupres de l'API Discord, rafraichit le panneau d'administration
+ * de toutes les guildes, puis demarre le job d'escalade.
  *
  * L'enregistrement se fait soit sur une seule guilde de dev (`DEV_GUILD_ID`, propagation
  * instantanee — pratique en developpement), soit globalement (propagation jusqu'a ~1h,
@@ -29,6 +31,17 @@ export async function onReady(readyClient: Client<true>): Promise<void> {
     }
   } catch (error) {
     logger.error("Echec de l'enregistrement des commandes slash", error);
+  }
+
+  // Reconstruit chaque message dedie du panneau a partir du code courant : une mise a jour
+  // du bot qui change un embed/des boutons se propage donc automatiquement aux messages
+  // deja postes, sans qu'un admin ait a recliquer chaque bouton ou relancer
+  // `/config set-panel-channel` pour voir apparaitre les changements.
+  try {
+    await refreshAllPanelsAcrossGuilds(readyClient);
+    logger.info("Panneau d'administration rafraichi pour toutes les guildes configurees");
+  } catch (error) {
+    logger.error("Echec du rafraichissement du panneau d'administration au demarrage", error);
   }
 
   startEscalationJob(readyClient);

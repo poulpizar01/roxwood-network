@@ -392,3 +392,107 @@ export function buildMonitoringPanelRows(config: { monitoringChannels: { type: M
 
   return [row1, row2, row3];
 }
+
+/**
+ * Un `refresh*PanelMessage` par cle : reconstruit l'embed/les boutons a partir de l'etat
+ * courant de la config et les applique au message dedie (cree ou edite en place). Regroupes
+ * ici (plutot que duplique pres de chaque handler d'interaction) pour une seule raison :
+ * `refreshAllPanelMessages` (voir plus bas, appelee au demarrage du bot) doit pouvoir
+ * rafraichir n'importe quel message existant a partir de sa seule cle, sans dependre du
+ * contexte d'une interaction Discord precise.
+ */
+export async function refreshRootPanelMessage(client: Client, guildId: string, channelId: string): Promise<void> {
+  await upsertPanelMessage(client, guildId, "ROOT", channelId, {
+    embeds: [buildRootPanelEmbed()],
+    components: [buildRootPanelRow()],
+  });
+}
+
+export async function refreshTicketsPanelMessage(client: Client, guildId: string, channelId: string): Promise<void> {
+  await upsertPanelMessage(client, guildId, "TICKETS", channelId, {
+    embeds: [await buildTicketsPanelEmbed(guildId)],
+    components: buildTicketsPanelRows(),
+  });
+}
+
+export async function refreshServicePanelMessage(client: Client, guildId: string, channelId: string): Promise<void> {
+  const config = await getGuildConfig(guildId);
+  const categoryId = config?.ticketCategories.find((c) => c.type === "SERVICE")?.categoryId ?? null;
+  await upsertPanelMessage(client, guildId, "SERVICE", channelId, {
+    embeds: [await buildServicePanelEmbed(guildId)],
+    components: buildServicePanelRows(categoryId),
+  });
+}
+
+export async function refreshRecruitmentPanelMessage(client: Client, guildId: string, channelId: string): Promise<void> {
+  const config = await getGuildConfig(guildId);
+  const categoryId = config?.ticketCategories.find((c) => c.type === "RECRUITMENT")?.categoryId ?? null;
+  await upsertPanelMessage(client, guildId, "RECRUITMENT", channelId, {
+    embeds: [await buildRecruitmentPanelEmbed(guildId)],
+    components: buildRecruitmentPanelRows(config?.recruitmentOpen ?? true, categoryId),
+  });
+}
+
+export async function refreshAbsencesPanelMessage(client: Client, guildId: string, channelId: string): Promise<void> {
+  await upsertPanelMessage(client, guildId, "ABSENCES", channelId, {
+    embeds: [await buildAbsencesPanelEmbed(guildId)],
+    components: buildAbsencesPanelRows(),
+  });
+}
+
+export async function refreshFaqPanelMessage(client: Client, guildId: string, channelId: string): Promise<void> {
+  await upsertPanelMessage(client, guildId, "FAQ", channelId, {
+    embeds: [await buildFaqPanelEmbed(guildId)],
+    components: buildFaqPanelRows(),
+  });
+}
+
+export async function refreshMonitoringPanelMessage(client: Client, guildId: string, channelId: string): Promise<void> {
+  const config = await getGuildConfig(guildId);
+  await upsertPanelMessage(client, guildId, "MONITORING", channelId, {
+    embeds: [await buildMonitoringPanelEmbed(guildId)],
+    components: buildMonitoringPanelRows(config),
+  });
+}
+
+const REFRESH_BY_KEY: Record<PanelMessageKey, (client: Client, guildId: string, channelId: string) => Promise<void>> = {
+  ROOT: refreshRootPanelMessage,
+  TICKETS: refreshTicketsPanelMessage,
+  SERVICE: refreshServicePanelMessage,
+  RECRUITMENT: refreshRecruitmentPanelMessage,
+  ABSENCES: refreshAbsencesPanelMessage,
+  FAQ: refreshFaqPanelMessage,
+  MONITORING: refreshMonitoringPanelMessage,
+};
+
+/**
+ * Recharge (edite en place) tous les messages dedies actives d'une guilde a partir du code
+ * courant. Appelee au demarrage du bot (voir `refreshAllPanelsAcrossGuilds`) pour qu'une
+ * evolution des boutons/embeds cote code (ex: un nouveau bouton ajoute sur le message racine)
+ * se propage automatiquement aux messages deja postes sans action manuelle — avant ce
+ * correctif, il fallait recliquer chaque bouton (ou relancer `/config set-panel-channel`)
+ * pour voir apparaitre les changements, ce que l'utilisateur a signale comme trompeur
+ * ("je dois reconfigurer le channel et du coup je perds tout", alors qu'en realite rien
+ * n'etait perdu — juste l'affichage qui restait perime).
+ */
+export async function refreshAllPanelMessages(client: Client, guildId: string): Promise<void> {
+  const config = await getGuildConfig(guildId);
+  if (!config?.panelChannelId) return;
+
+  const messages = await prisma.panelMessage.findMany({ where: { guildId, enabled: true } });
+  for (const message of messages) {
+    try {
+      await REFRESH_BY_KEY[message.key](client, guildId, config.panelChannelId);
+    } catch (error) {
+      logger.error(`Echec du rafraichissement du message panneau ${message.key} pour la guilde ${guildId}`, error);
+    }
+  }
+}
+
+/** Rafraichit le panneau de toutes les guildes ayant un salon panneau configure — appelee une seule fois au demarrage du bot. */
+export async function refreshAllPanelsAcrossGuilds(client: Client): Promise<void> {
+  const configs = await prisma.guildConfig.findMany({ where: { panelChannelId: { not: null } } });
+  for (const config of configs) {
+    await refreshAllPanelMessages(client, config.guildId);
+  }
+}
