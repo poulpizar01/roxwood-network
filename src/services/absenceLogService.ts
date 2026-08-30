@@ -74,7 +74,7 @@ export async function postAbsenceRequest(
   const channel = await client.channels.fetch(channelId);
   if (!channel?.isTextBased() || channel.isDMBased()) return false;
 
-  const mention = config?.absenceApproverRoleId ? `<@&${config.absenceApproverRoleId}>` : "";
+  const mention = config?.absenceApproverRoleIds.map((roleId) => `<@&${roleId}>`).join(" ") ?? "";
   const message = await channel.send({
     content: mention || undefined,
     embeds: [buildAbsenceEmbed(request)],

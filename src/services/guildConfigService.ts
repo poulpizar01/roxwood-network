@@ -134,30 +134,18 @@ export async function clearCategoryForType(guildId: string, type: TicketType): P
 }
 
 /**
- * Ajoute un role de gestion a une categorie de ticket. No-op si la categorie n'existe pas
- * (pas encore mappee) ou si le role est deja present.
+ * Definit (remplace entierement) les roles de gestion d'une categorie de ticket, a partir
+ * d'une selection multiple (RoleSelectMenu Discord, 0 a 25 roles). No-op si la categorie
+ * n'existe pas (pas encore mappee).
  */
-export async function addCategoryManagerRole(guildId: string, categoryId: string, roleId: string): Promise<GuildConfigWithCategories> {
-  const config = await ensureGuildConfig(guildId);
-  const category = config.ticketCategories.find((c) => c.categoryId === categoryId);
-  if (!category || category.managerRoleIds.includes(roleId)) return config;
-
-  await prisma.ticketCategoryConfig.update({
-    where: { guildId_categoryId: { guildId, categoryId } },
-    data: { managerRoleIds: { push: roleId } },
-  });
-  return refresh(guildId);
-}
-
-/** Retire un role de gestion d'une categorie de ticket. */
-export async function removeCategoryManagerRole(guildId: string, categoryId: string, roleId: string): Promise<GuildConfigWithCategories> {
+export async function setCategoryManagerRoles(guildId: string, categoryId: string, roleIds: string[]): Promise<GuildConfigWithCategories> {
   const config = await ensureGuildConfig(guildId);
   const category = config.ticketCategories.find((c) => c.categoryId === categoryId);
   if (!category) return config;
 
   await prisma.ticketCategoryConfig.update({
     where: { guildId_categoryId: { guildId, categoryId } },
-    data: { managerRoleIds: category.managerRoleIds.filter((id) => id !== roleId) },
+    data: { managerRoleIds: roleIds },
   });
   return refresh(guildId);
 }
@@ -200,22 +188,16 @@ export async function setPanelChannel(guildId: string, channelId: string): Promi
   return refresh(guildId);
 }
 
-/** Definit le role autorise a accepter/refuser les demandes d'absence. */
-export async function setAbsenceApproverRole(guildId: string, roleId: string): Promise<GuildConfigWithCategories> {
+/**
+ * Definit (remplace entierement) les roles autorises a accepter/refuser les demandes
+ * d'absence, a partir d'une selection multiple (RoleSelectMenu Discord, 0 a 25 roles).
+ * Liste vide = personne configure (equivalent de l'ancien "retirer").
+ */
+export async function setAbsenceApproverRoles(guildId: string, roleIds: string[]): Promise<GuildConfigWithCategories> {
   await ensureGuildConfig(guildId);
   await prisma.guildConfig.update({
     where: { guildId },
-    data: { absenceApproverRoleId: roleId },
-  });
-  return refresh(guildId);
-}
-
-/** Retire le role approbateur des demandes d'absence. */
-export async function clearAbsenceApproverRole(guildId: string): Promise<GuildConfigWithCategories> {
-  await ensureGuildConfig(guildId);
-  await prisma.guildConfig.update({
-    where: { guildId },
-    data: { absenceApproverRoleId: null },
+    data: { absenceApproverRoleIds: roleIds },
   });
   return refresh(guildId);
 }
@@ -270,10 +252,10 @@ export function isTicketManager(
   return category.managerRoleIds.some((roleId) => memberRoleIds.includes(roleId));
 }
 
-/** Indique si un des roles donnes est le role approbateur des demandes d'absence de cette guilde. */
+/** Indique si un des roles donnes fait partie des roles approbateurs des demandes d'absence de cette guilde. */
 export function isAbsenceApprover(config: GuildConfigWithCategories | null, memberRoleIds: string[]): boolean {
-  if (!config?.absenceApproverRoleId) return false;
-  return memberRoleIds.includes(config.absenceApproverRoleId);
+  if (!config?.absenceApproverRoleIds.length) return false;
+  return config.absenceApproverRoleIds.some((roleId) => memberRoleIds.includes(roleId));
 }
 
 /**

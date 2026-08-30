@@ -152,8 +152,7 @@ export async function buildTicketsPanelEmbed(guildId: string): Promise<EmbedBuil
  */
 export function buildTicketsPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
   const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("panel:tickets:add-role").setLabel("Ajouter un rôle de gestion").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("panel:tickets:remove-role").setLabel("Retirer un rôle de gestion").setStyle(ButtonStyle.Danger)
+    new ButtonBuilder().setCustomId("panel:tickets:set-roles").setLabel("Définir les rôles de gestion").setStyle(ButtonStyle.Primary)
   );
   const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("panel:tickets:service").setLabel("Service client").setStyle(ButtonStyle.Secondary),
@@ -171,32 +170,31 @@ export function buildTicketsPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
  */
 export async function buildAbsencesPanelEmbed(guildId: string): Promise<EmbedBuilder> {
   const config = await getGuildConfig(guildId);
-  const role = config?.absenceApproverRoleId ? `<@&${config.absenceApproverRoleId}>` : "Non configuré";
+  const roleIds = config?.absenceApproverRoleIds ?? [];
+  const roles = roleIds.length ? roleIds.map((r) => `<@&${r}>`).join(" ") : "Non configuré";
   const channel = config?.absenceReviewChannelId ? `<#${config.absenceReviewChannelId}>` : "Non configuré";
-  const ready = Boolean(config?.absenceApproverRoleId && config?.absenceReviewChannelId);
+  const ready = Boolean(roleIds.length && config?.absenceReviewChannelId);
 
   return new EmbedBuilder()
     .setTitle("Absences")
     .setColor(0x5865f2)
-    .addFields({ name: "Rôle approbateur", value: role, inline: true }, { name: "Salon de suivi", value: channel, inline: true })
+    .addFields({ name: "Rôles approbateurs", value: roles, inline: true }, { name: "Salon de suivi", value: channel, inline: true })
     .setDescription(
       ready
         ? "Les membres peuvent déclarer une absence avec la commande /absence."
-        : "Configurez le rôle approbateur et le salon de suivi ci-dessous avant que /absence ne soit utilisable."
+        : "Configurez au moins un rôle approbateur et le salon de suivi ci-dessous avant que /absence ne soit utilisable."
     );
 }
 
 /**
- * Boutons de configuration du message dedie "Absences" : role approbateur et salon de suivi,
- * chacun en bouton unique Definir/Retirer selon l'etat courant — meme convention que les
- * categories de ticket (Service client/Recrutement/FAQ) et les salons de Monitoring.
+ * Boutons de configuration du message dedie "Absences" : roles approbateurs (multi-select
+ * Discord natif, remplace la selection entiere a chaque usage — voir
+ * `panel:absences:set-approver-roles`) et salon de suivi (bouton unique Definir/Retirer selon
+ * l'etat courant, meme convention que les categories de ticket).
  */
-export function buildAbsencesPanelRows(approverRoleId: string | null, reviewChannelId: string | null): ActionRowBuilder<ButtonBuilder>[] {
+export function buildAbsencesPanelRows(reviewChannelId: string | null): ActionRowBuilder<ButtonBuilder>[] {
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(approverRoleId ? "panel:absences:clear-approver-role" : "panel:absences:set-approver-role")
-      .setLabel(approverRoleId ? "Retirer le rôle approbateur" : "Définir le rôle approbateur")
-      .setStyle(approverRoleId ? ButtonStyle.Danger : ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("panel:absences:set-approver-roles").setLabel("Définir les rôles approbateurs").setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId(reviewChannelId ? "panel:absences:clear-review-channel" : "panel:absences:set-review-channel")
       .setLabel(reviewChannelId ? "Retirer le salon de suivi" : "Définir le salon de suivi")
@@ -521,7 +519,7 @@ export async function refreshAbsencesPanelMessage(client: Client, guildId: strin
   const config = await getGuildConfig(guildId);
   await upsertPanelMessage(client, guildId, "ABSENCES", channelId, {
     embeds: [await buildAbsencesPanelEmbed(guildId)],
-    components: buildAbsencesPanelRows(config?.absenceApproverRoleId ?? null, config?.absenceReviewChannelId ?? null),
+    components: buildAbsencesPanelRows(config?.absenceReviewChannelId ?? null),
   });
 }
 

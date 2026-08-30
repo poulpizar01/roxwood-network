@@ -23,10 +23,10 @@ model GuildConfig {
   /// Salon designe pour heberger les messages permanents du panneau d'administration
   /// (voir PanelMessage). Un seul salon par guilde.
   panelChannelId    String?
-  /// Role autorise a accepter/refuser une demande d'absence (boutons du message de suivi
-  /// dans `absenceReviewChannelId`). `null` = personne configure, le bouton "Declarer une
-  /// absence" reste desactive tant que ce role n'est pas defini.
-  absenceApproverRoleId  String?
+  /// Roles autorises a accepter/refuser une demande d'absence (boutons du message de suivi
+  /// dans `absenceReviewChannelId`). Plusieurs roles possibles (ex: plusieurs paliers de
+  /// management). Vide = personne configure, le bouton "Declarer une absence" reste desactive.
+  absenceApproverRoleIds String[] @default([])
   /// Salon dedie ou sont postees les demandes d'absence pour validation staff — separe du
   /// salon panneau, meme logique que `recruitmentLogChannelId`. `null` = pas configure.
   absenceReviewChannelId String?

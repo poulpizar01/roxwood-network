@@ -46,8 +46,6 @@ import {
 } from "../services/orderService.js";
 import { ORDER_STATUS_CHOICES, orderStatusLabel, sendInvoiceForOrder, upsertOrderMessage } from "../services/orderLogService.js";
 import {
-  addCategoryManagerRole,
-  clearAbsenceApproverRole,
   clearAbsenceReviewChannel,
   clearCategoryForType,
   clearMonitoringChannel,
@@ -57,10 +55,10 @@ import {
   getGuildConfig,
   isAbsenceApprover,
   isTicketManager,
-  removeCategoryManagerRole,
-  setAbsenceApproverRole,
+  setAbsenceApproverRoles,
   setAbsenceReviewChannel,
   setCategoryForType,
+  setCategoryManagerRoles,
   setMonitoringChannel,
   setMonitoringJobId,
   setOnDutyRole,
@@ -722,11 +720,11 @@ async function handlePanelTicketsNested(interaction: Interaction, key: "SERVICE"
 }
 
 /**
- * Clic sur "Ajouter un rôle de gestion" : d'abord choisir le type concerne (au plus 2 —
- * Recrutement/Service — puisqu'un seul mapping existe par type). La valeur transmise reste
+ * Clic sur "Définir les rôles de gestion" : d'abord choisir le type concerne (au plus 3 —
+ * Recrutement/Service/FAQ — puisqu'un seul mapping existe par type). La valeur transmise reste
  * la `categoryId` (cle technique du `TicketCategoryConfig`), seul le libelle affiche change.
  */
-async function handlePanelTicketsAddRole(interaction: Interaction): Promise<void> {
+async function handlePanelTicketsSetRoles(interaction: Interaction): Promise<void> {
   if (!interaction.isButton() || !interaction.guildId) return;
 
   const config = await getGuildConfig(interaction.guildId);
@@ -737,53 +735,7 @@ async function handlePanelTicketsAddRole(interaction: Interaction): Promise<void
   }
 
   const select = new StringSelectMenuBuilder()
-    .setCustomId("panel:tickets:add-role-category")
-    .setPlaceholder("Choisir un type")
-    .addOptions(
-      categories.map((c) => ({
-        label: TICKET_TYPE_LABELS[c.type],
-        value: c.categoryId,
-      }))
-    );
-
-  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
-  await interaction.reply({ components: [row], ephemeral: true });
-}
-
-/** Categorie choisie : menu natif Discord (RoleSelectMenu) pour choisir le role a ajouter. */
-async function handlePanelTicketsAddRoleCategory(interaction: Interaction): Promise<void> {
-  if (!interaction.isStringSelectMenu()) return;
-
-  const categoryId = interaction.values[0];
-  const select = new RoleSelectMenuBuilder().setCustomId(`panel:tickets:add-role-select:${categoryId}`).setPlaceholder("Choisir un rôle");
-
-  const row = new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(select);
-  await interaction.update({ content: "Quel rôle ajouter comme gestionnaire ?", components: [row] });
-}
-
-async function handlePanelTicketsAddRoleSelect(interaction: Interaction, categoryId: string): Promise<void> {
-  if (!interaction.isRoleSelectMenu() || !interaction.guildId || !interaction.channelId) return;
-
-  const roleId = interaction.values[0];
-  await addCategoryManagerRole(interaction.guildId, categoryId, roleId);
-  await refreshTicketsPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
-
-  await interaction.update({ content: `Rôle <@&${roleId}> ajouté comme gestionnaire.`, components: [] });
-}
-
-/** Clic sur "Retirer un rôle de gestion" : d'abord choisir le type (ceux qui ont au moins un role). */
-async function handlePanelTicketsRemoveRole(interaction: Interaction): Promise<void> {
-  if (!interaction.isButton() || !interaction.guildId) return;
-
-  const config = await getGuildConfig(interaction.guildId);
-  const categories = (config?.ticketCategories ?? []).filter((c) => c.managerRoleIds.length > 0);
-  if (categories.length === 0) {
-    await interaction.reply({ content: "Aucun rôle de gestion configuré pour le moment.", ephemeral: true });
-    return;
-  }
-
-  const select = new StringSelectMenuBuilder()
-    .setCustomId("panel:tickets:remove-role-category")
+    .setCustomId("panel:tickets:set-roles-category")
     .setPlaceholder("Choisir un type")
     .addOptions(
       categories.map((c) => ({
@@ -797,43 +749,39 @@ async function handlePanelTicketsRemoveRole(interaction: Interaction): Promise<v
 }
 
 /**
- * Categorie choisie : liste ses roles de gestion actuels sous forme de `StringSelectMenu`
- * (pas de `RoleSelectMenu` ici : on doit filtrer aux roles deja assignes a cette categorie,
- * ce qu'un menu de roles natif ne permet pas — il proposerait tous les roles de la guilde).
+ * Categorie choisie : menu natif Discord (RoleSelectMenu) en selection multiple, pre-rempli
+ * avec les roles deja assignes (`setDefaultRoles`) — valider remplace l'ensemble complet des
+ * roles de gestion de cette categorie (0 role = tout retirer en un seul geste).
  */
-async function handlePanelTicketsRemoveRoleCategory(interaction: Interaction): Promise<void> {
-  if (!interaction.isStringSelectMenu() || !interaction.guildId || !interaction.guild) return;
+async function handlePanelTicketsSetRolesCategory(interaction: Interaction): Promise<void> {
+  if (!interaction.isStringSelectMenu() || !interaction.guildId) return;
 
   const categoryId = interaction.values[0];
   const config = await getGuildConfig(interaction.guildId);
-  const roleIds = config?.ticketCategories.find((c) => c.categoryId === categoryId)?.managerRoleIds ?? [];
-  if (roleIds.length === 0) {
-    await interaction.update({ content: "Aucun rôle de gestion sur cette catégorie.", components: [] });
-    return;
-  }
+  const currentRoleIds = config?.ticketCategories.find((c) => c.categoryId === categoryId)?.managerRoleIds ?? [];
 
-  const select = new StringSelectMenuBuilder()
-    .setCustomId(`panel:tickets:remove-role-select:${categoryId}`)
-    .setPlaceholder("Choisir un rôle à retirer")
-    .addOptions(
-      roleIds.map((roleId) => ({
-        label: (interaction.guild!.roles.cache.get(roleId)?.name ?? roleId).slice(0, 100),
-        value: roleId,
-      }))
-    );
+  const select = new RoleSelectMenuBuilder()
+    .setCustomId(`panel:tickets:set-roles-select:${categoryId}`)
+    .setPlaceholder("Choisir un ou plusieurs rôles")
+    .setMinValues(0)
+    .setMaxValues(25);
+  if (currentRoleIds.length > 0) select.setDefaultRoles(currentRoleIds);
 
-  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
-  await interaction.update({ content: "Quel rôle retirer ?", components: [row] });
+  const row = new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(select);
+  await interaction.update({ content: "Quels rôles doivent gérer cette catégorie ?", components: [row] });
 }
 
-async function handlePanelTicketsRemoveRoleSelect(interaction: Interaction, categoryId: string): Promise<void> {
-  if (!interaction.isStringSelectMenu() || !interaction.guildId || !interaction.channelId) return;
+async function handlePanelTicketsSetRolesSelect(interaction: Interaction, categoryId: string): Promise<void> {
+  if (!interaction.isRoleSelectMenu() || !interaction.guildId || !interaction.channelId) return;
 
-  const roleId = interaction.values[0];
-  await removeCategoryManagerRole(interaction.guildId, categoryId, roleId);
+  const roleIds = interaction.values;
+  await setCategoryManagerRoles(interaction.guildId, categoryId, roleIds);
   await refreshTicketsPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
 
-  await interaction.update({ content: "Rôle retiré.", components: [] });
+  await interaction.update({
+    content: roleIds.length ? `Rôles de gestion définis : ${roleIds.map((r) => `<@&${r}>`).join(" ")}` : "Rôles de gestion retirés.",
+    components: [],
+  });
 }
 
 /**
@@ -869,31 +817,38 @@ async function handleAbsenceSubmitForm(interaction: Interaction): Promise<void> 
   });
 }
 
-/** Clic sur "Définir le rôle approbateur" : menu natif Discord (RoleSelectMenu). */
-async function handlePanelAbsencesSetApproverRole(interaction: Interaction): Promise<void> {
-  if (!interaction.isButton()) return;
+/**
+ * Clic sur "Définir les rôles approbateurs" : menu natif Discord (RoleSelectMenu) en
+ * selection multiple, pre-rempli avec les roles deja configures — valider remplace
+ * l'ensemble complet (0 role = tout retirer en un seul geste).
+ */
+async function handlePanelAbsencesSetApproverRoles(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId) return;
 
-  const select = new RoleSelectMenuBuilder().setCustomId("panel:absences:set-approver-role-select").setPlaceholder("Choisir un rôle");
+  const config = await getGuildConfig(interaction.guildId);
+  const currentRoleIds = config?.absenceApproverRoleIds ?? [];
+
+  const select = new RoleSelectMenuBuilder()
+    .setCustomId("panel:absences:set-approver-roles-select")
+    .setPlaceholder("Choisir un ou plusieurs rôles")
+    .setMinValues(0)
+    .setMaxValues(25);
+  if (currentRoleIds.length > 0) select.setDefaultRoles(currentRoleIds);
+
   const row = new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(select);
   await interaction.reply({ components: [row], ephemeral: true });
 }
 
-async function handlePanelAbsencesSetApproverRoleSelect(interaction: Interaction): Promise<void> {
+async function handlePanelAbsencesSetApproverRolesSelect(interaction: Interaction): Promise<void> {
   if (!interaction.isRoleSelectMenu() || !interaction.guildId || !interaction.channelId) return;
 
-  const roleId = interaction.values[0];
-  await setAbsenceApproverRole(interaction.guildId, roleId);
+  const roleIds = interaction.values;
+  await setAbsenceApproverRoles(interaction.guildId, roleIds);
   await refreshAbsencesPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
-  await interaction.update({ content: `Rôle approbateur défini sur <@&${roleId}>.`, components: [] });
-}
-
-/** Clic sur "Retirer le rôle approbateur" : retire directement, un seul rôle possible. */
-async function handlePanelAbsencesClearApproverRole(interaction: Interaction): Promise<void> {
-  if (!interaction.isButton() || !interaction.guildId || !interaction.channelId) return;
-
-  await clearAbsenceApproverRole(interaction.guildId);
-  await refreshAbsencesPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
-  await interaction.reply({ content: "Rôle approbateur retiré.", ephemeral: true });
+  await interaction.update({
+    content: roleIds.length ? `Rôles approbateurs définis : ${roleIds.map((r) => `<@&${r}>`).join(" ")}` : "Rôles approbateurs retirés.",
+    components: [],
+  });
 }
 
 /** Clic sur "Définir le salon de suivi" : menu natif Discord filtre aux salons textuels. */
@@ -1756,10 +1711,8 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:tickets:service") return await handlePanelTicketsNested(interaction, "SERVICE");
       if (interaction.customId === "panel:tickets:recruitment") return await handlePanelTicketsNested(interaction, "RECRUITMENT");
       if (interaction.customId === "panel:tickets:faq") return await handlePanelTicketsNested(interaction, "FAQ");
-      if (interaction.customId === "panel:tickets:add-role") return await handlePanelTicketsAddRole(interaction);
-      if (interaction.customId === "panel:tickets:remove-role") return await handlePanelTicketsRemoveRole(interaction);
-      if (interaction.customId === "panel:absences:set-approver-role") return await handlePanelAbsencesSetApproverRole(interaction);
-      if (interaction.customId === "panel:absences:clear-approver-role") return await handlePanelAbsencesClearApproverRole(interaction);
+      if (interaction.customId === "panel:tickets:set-roles") return await handlePanelTicketsSetRoles(interaction);
+      if (interaction.customId === "panel:absences:set-approver-roles") return await handlePanelAbsencesSetApproverRoles(interaction);
       if (interaction.customId === "panel:absences:set-review-channel") return await handlePanelAbsencesSetReviewChannel(interaction);
       if (interaction.customId === "panel:absences:clear-review-channel") return await handlePanelAbsencesClearReviewChannel(interaction);
       if (interaction.customId.startsWith("absence:accept:")) {
@@ -1829,10 +1782,10 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
     }
 
     if (interaction.isRoleSelectMenu()) {
-      if (interaction.customId.startsWith("panel:tickets:add-role-select:")) {
-        return await handlePanelTicketsAddRoleSelect(interaction, interaction.customId.slice("panel:tickets:add-role-select:".length));
+      if (interaction.customId.startsWith("panel:tickets:set-roles-select:")) {
+        return await handlePanelTicketsSetRolesSelect(interaction, interaction.customId.slice("panel:tickets:set-roles-select:".length));
       }
-      if (interaction.customId === "panel:absences:set-approver-role-select") return await handlePanelAbsencesSetApproverRoleSelect(interaction);
+      if (interaction.customId === "panel:absences:set-approver-roles-select") return await handlePanelAbsencesSetApproverRolesSelect(interaction);
       if (interaction.customId === "panel:monitoring:set-on-duty-role-select") return await handleMonitoringSetOnDutyRoleSelect(interaction);
       if (interaction.customId === "panel:recruitment:set-accepted-role-select") return await handleRecruitmentSetAcceptedRoleSelect(interaction);
       return;
@@ -1849,11 +1802,7 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId.startsWith("order:remove-item-select:")) {
         return await handleOrderRemoveItemSelect(interaction, interaction.customId.slice("order:remove-item-select:".length));
       }
-      if (interaction.customId === "panel:tickets:add-role-category") return await handlePanelTicketsAddRoleCategory(interaction);
-      if (interaction.customId === "panel:tickets:remove-role-category") return await handlePanelTicketsRemoveRoleCategory(interaction);
-      if (interaction.customId.startsWith("panel:tickets:remove-role-select:")) {
-        return await handlePanelTicketsRemoveRoleSelect(interaction, interaction.customId.slice("panel:tickets:remove-role-select:".length));
-      }
+      if (interaction.customId === "panel:tickets:set-roles-category") return await handlePanelTicketsSetRolesCategory(interaction);
       if (interaction.customId === "panel:service:remove-item-select") return await handleServiceRemoveItemSelect(interaction);
       if (interaction.customId === "panel:service:set-image-select") return await handleServiceSetImageSelect(interaction);
       if (interaction.customId === "panel:service:add-field-item") return await handleServiceAddFieldItem(interaction);
