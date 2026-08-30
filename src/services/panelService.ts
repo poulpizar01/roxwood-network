@@ -225,22 +225,36 @@ export async function buildServicePanelEmbed(guildId: string): Promise<EmbedBuil
         .slice(0, 25)
         .map((item) => {
           const fields = item.fields.length ? item.fields.map((f) => f.label).join(", ") : "aucun";
-          return `**${item.name}** — ${item.price.toLocaleString("fr-FR")} $ (photo : ${item.imageUrl ? "oui" : "non"})\nChamps : ${fields}`;
+          const weight = item.weightGrams !== null ? `${(item.weightGrams / 1000).toFixed(1)}kg` : "non renseigné";
+          return `**${item.name}** — ${item.price.toLocaleString("fr-FR")} $ (photo : ${item.imageUrl ? "oui" : "non"}, poids : ${weight})\nChamps : ${fields}`;
         })
         .join("\n\n"),
     });
   }
+
+  embed.addFields({
+    name: "Profil boutique (facture)",
+    value: [
+      `RIB : ${config?.shopRib ?? "non configuré"}`,
+      `Téléphone : ${config?.shopPhone ?? "non configuré"}`,
+      `Message de remerciement : ${config?.shopThankYouMessage ?? "non configuré"}`,
+      `Capacité d'un camion : ${config?.truckCapacityGrams ? `${(config.truckCapacityGrams / 1000).toFixed(1)}kg` : "non configurée"}`,
+      `Bannière : ${config?.shopBannerUrl ? "configurée" : "non configurée"}`,
+    ].join("\n"),
+  });
 
   return embed;
 }
 
 /**
  * Boutons du message dedie "Service client" : categorie (bouton unique, libelle Definir/Retirer
- * selon l'etat courant — meme principe que le bouton ouvrir/fermer les recrutements), puis
- * gestion des articles (ajout/retrait/photo) et de leurs champs. Remplace entierement
+ * selon l'etat courant — meme principe que le bouton ouvrir/fermer les recrutements), gestion
+ * des articles (ajout/retrait/photo/poids) et de leurs champs, et le profil boutique affiche
+ * en pied de facture (RIB/telephone/message/capacite camion regroupes dans un seul modal,
+ * banniere via le meme mecanisme d'upload que la photo d'un article). Remplace entierement
  * `/catalog add`/`remove`/`field-add`/`field-remove`.
  */
-export function buildServicePanelRows(categoryId: string | null): ActionRowBuilder<ButtonBuilder>[] {
+export function buildServicePanelRows(categoryId: string | null, bannerConfigured: boolean): ActionRowBuilder<ButtonBuilder>[] {
   const categoryRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(categoryId ? "panel:service:clear-category" : "panel:service:set-category")
@@ -252,13 +266,21 @@ export function buildServicePanelRows(categoryId: string | null): ActionRowBuild
     new ButtonBuilder().setCustomId("panel:service:remove-item").setLabel("Retirer un article").setStyle(ButtonStyle.Danger)
   );
   const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("panel:service:set-image").setLabel("Changer la photo d'un article").setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId("panel:service:set-image").setLabel("Changer la photo d'un article").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("panel:service:set-weight").setLabel("Définir le poids d'un article").setStyle(ButtonStyle.Secondary)
   );
   const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("panel:service:add-field").setLabel("Ajouter un champ").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("panel:service:remove-field").setLabel("Retirer un champ").setStyle(ButtonStyle.Danger)
   );
-  return [categoryRow, row1, row2, row3];
+  const row4 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("panel:service:set-shop-profile").setLabel("Configurer la boutique").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(bannerConfigured ? "panel:service:clear-banner" : "panel:service:set-banner")
+      .setLabel(bannerConfigured ? "Retirer la bannière" : "Définir la bannière")
+      .setStyle(bannerConfigured ? ButtonStyle.Danger : ButtonStyle.Success)
+  );
+  return [categoryRow, row1, row2, row3, row4];
 }
 
 /**
@@ -495,7 +517,7 @@ export async function refreshServicePanelMessage(client: Client, guildId: string
   const categoryId = config?.ticketCategories.find((c) => c.type === "SERVICE")?.categoryId ?? null;
   await upsertPanelMessage(client, guildId, "SERVICE", channelId, {
     embeds: [await buildServicePanelEmbed(guildId)],
-    components: buildServicePanelRows(categoryId),
+    components: buildServicePanelRows(categoryId, Boolean(config?.shopBannerUrl)),
   });
 }
 

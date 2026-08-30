@@ -34,6 +34,7 @@ import {
   removeField,
   removeItem as removeCatalogItem,
   setItemImage,
+  setItemWeight,
 } from "../services/catalogService.js";
 import {
   addItemFromAnswers,
@@ -41,6 +42,8 @@ import {
   getOrderByTicket,
   markConfirmed,
   removeItem as removeOrderItem,
+  setDeliveryFee,
+  setDiscount,
   setPaymentStatus,
   setStatus as setOrderStatus,
 } from "../services/orderService.js";
@@ -52,6 +55,7 @@ import {
   clearRecruitmentAcceptedCategory,
   clearRecruitmentAcceptedRole,
   clearRecruitmentStatusChannel,
+  clearShopBanner,
   getGuildConfig,
   isAbsenceApprover,
   isTicketManager,
@@ -67,6 +71,8 @@ import {
   setRecruitmentLogChannel,
   setRecruitmentOpen,
   setRecruitmentStatusChannel,
+  setShopBanner,
+  setShopProfile,
 } from "../services/guildConfigService.js";
 import {
   addQuestion as addRecruitmentQuestion,
@@ -612,6 +618,90 @@ async function handleOrderInvoiceButton(interaction: Interaction, ticketId: stri
   await interaction.editReply("Facture renvoyée.");
 }
 
+/** Clic sur "Livraison" : modal avec le montant courant pre-rempli. Reserve aux gestionnaires de la categorie du ticket. */
+async function handleOrderSetDeliveryButton(interaction: Interaction, ticketId: string): Promise<void> {
+  if (!interaction.isButton()) return;
+
+  const ticket = await getTicketById(ticketId);
+  if (!ticket) {
+    await interaction.reply({ content: "Commande introuvable.", ephemeral: true });
+    return;
+  }
+  if (!(await isStaffInteraction(interaction, ticket.categoryId))) {
+    await interaction.reply({ content: NOT_STAFF_MESSAGE, ephemeral: true });
+    return;
+  }
+
+  const order = await getOrderByTicket(ticketId);
+  const modal = new ModalBuilder().setCustomId(`order:set-delivery-modal:${ticketId}`).setTitle("Frais de livraison");
+  const amountInput = new TextInputBuilder().setCustomId("amount").setLabel("Montant").setStyle(TextInputStyle.Short).setRequired(true);
+  amountInput.setValue(String(order?.deliveryFee ?? 0));
+  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(amountInput));
+  await interaction.showModal(modal);
+}
+
+async function handleOrderSetDeliveryModal(interaction: Interaction, ticketId: string): Promise<void> {
+  if (!interaction.isModalSubmit()) return;
+
+  const amount = Number(interaction.fields.getTextInputValue("amount"));
+  if (!Number.isInteger(amount) || amount < 0) {
+    await interaction.reply({ content: "Montant invalide : entre un nombre entier positif.", ephemeral: true });
+    return;
+  }
+
+  const order = await getOrderByTicket(ticketId);
+  if (!order) {
+    await interaction.reply({ content: "Commande introuvable.", ephemeral: true });
+    return;
+  }
+
+  await setDeliveryFee(order.id, amount);
+  await upsertOrderMessage(interaction.client, ticketId);
+  await interaction.reply({ content: `Livraison définie sur ${amount.toLocaleString("fr-FR")} $.`, ephemeral: true });
+}
+
+/** Clic sur "Réduction" : modal avec le montant courant pre-rempli. Reserve aux gestionnaires de la categorie du ticket. */
+async function handleOrderSetDiscountButton(interaction: Interaction, ticketId: string): Promise<void> {
+  if (!interaction.isButton()) return;
+
+  const ticket = await getTicketById(ticketId);
+  if (!ticket) {
+    await interaction.reply({ content: "Commande introuvable.", ephemeral: true });
+    return;
+  }
+  if (!(await isStaffInteraction(interaction, ticket.categoryId))) {
+    await interaction.reply({ content: NOT_STAFF_MESSAGE, ephemeral: true });
+    return;
+  }
+
+  const order = await getOrderByTicket(ticketId);
+  const modal = new ModalBuilder().setCustomId(`order:set-discount-modal:${ticketId}`).setTitle("Réduction");
+  const amountInput = new TextInputBuilder().setCustomId("amount").setLabel("Montant").setStyle(TextInputStyle.Short).setRequired(true);
+  amountInput.setValue(String(order?.discount ?? 0));
+  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(amountInput));
+  await interaction.showModal(modal);
+}
+
+async function handleOrderSetDiscountModal(interaction: Interaction, ticketId: string): Promise<void> {
+  if (!interaction.isModalSubmit()) return;
+
+  const amount = Number(interaction.fields.getTextInputValue("amount"));
+  if (!Number.isInteger(amount) || amount < 0) {
+    await interaction.reply({ content: "Montant invalide : entre un nombre entier positif.", ephemeral: true });
+    return;
+  }
+
+  const order = await getOrderByTicket(ticketId);
+  if (!order) {
+    await interaction.reply({ content: "Commande introuvable.", ephemeral: true });
+    return;
+  }
+
+  await setDiscount(order.id, amount);
+  await upsertOrderMessage(interaction.client, ticketId);
+  await interaction.reply({ content: `Réduction définie sur ${amount.toLocaleString("fr-FR")} $.`, ephemeral: true });
+}
+
 /**
  * Clic sur "Retirer un article" (message de suivi d'une commande) : affiche, en ephemere,
  * un menu deroulant des lignes actuelles de la commande. Reserve aux gestionnaires de la categorie du ticket.
@@ -1064,6 +1154,162 @@ async function handleServiceSetImageSelect(interaction: Interaction): Promise<vo
   await photoMessage.delete().catch((error: unknown) => logger.warn("Echec suppression du message photo dans le panneau", error));
   await refreshServicePanelMessage(interaction.client, interaction.guildId, interaction.channelId);
   await interaction.editReply({ content: "Photo mise à jour." });
+}
+
+/** Clic sur "Définir le poids d'un article" : menu natif des articles actifs. */
+async function handlePanelServiceSetWeight(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId) return;
+
+  const options = await buildItemOptions(interaction.guildId);
+  if (options.length === 0) {
+    await interaction.reply({ content: "Aucun article configuré.", ephemeral: true });
+    return;
+  }
+
+  const select = new StringSelectMenuBuilder().setCustomId("panel:service:set-weight-select").setPlaceholder("Choisir un article").addOptions(options);
+  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+  await interaction.reply({ components: [row], ephemeral: true });
+}
+
+/** Article choisi : modal avec le poids unitaire courant pre-rempli (vide = retirer le poids). */
+async function handleServiceSetWeightSelect(interaction: Interaction): Promise<void> {
+  if (!interaction.isStringSelectMenu() || !interaction.guildId) return;
+
+  const itemId = interaction.values[0];
+  const item = await getItem(interaction.guildId, itemId);
+
+  const modal = new ModalBuilder().setCustomId(`panel:service:set-weight-modal:${itemId}`).setTitle("Poids de l'article");
+  const weightInput = new TextInputBuilder()
+    .setCustomId("weightGrams")
+    .setLabel("Poids unitaire (grammes, vide = aucun)")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false);
+  if (item?.weightGrams != null) weightInput.setValue(String(item.weightGrams));
+
+  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(weightInput));
+  await interaction.showModal(modal);
+}
+
+async function handleServiceSetWeightModal(interaction: Interaction, itemId: string): Promise<void> {
+  if (!interaction.isModalSubmit() || !interaction.guildId || !interaction.channelId) return;
+
+  const raw = interaction.fields.getTextInputValue("weightGrams").trim();
+  if (raw === "") {
+    await setItemWeight(interaction.guildId, itemId, null);
+    await refreshServicePanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+    await interaction.reply({ content: "Poids retiré.", ephemeral: true });
+    return;
+  }
+
+  const weightGrams = Number(raw);
+  if (!Number.isInteger(weightGrams) || weightGrams < 0) {
+    await interaction.reply({ content: "Poids invalide : entre un nombre entier de grammes positif, ou laisse vide.", ephemeral: true });
+    return;
+  }
+
+  await setItemWeight(interaction.guildId, itemId, weightGrams);
+  await refreshServicePanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.reply({ content: `Poids unitaire défini sur ${weightGrams}g.`, ephemeral: true });
+}
+
+/** Clic sur "Configurer la boutique" : modal regroupant RIB/telephone/message/capacite camion. */
+async function handlePanelServiceSetShopProfile(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId) return;
+
+  const config = await getGuildConfig(interaction.guildId);
+  const modal = new ModalBuilder().setCustomId("panel:service:set-shop-profile-modal").setTitle("Configurer la boutique");
+
+  const ribInput = new TextInputBuilder().setCustomId("rib").setLabel("RIB pour le règlement").setStyle(TextInputStyle.Short).setRequired(false);
+  if (config?.shopRib) ribInput.setValue(config.shopRib);
+
+  const phoneInput = new TextInputBuilder().setCustomId("phone").setLabel("Téléphone").setStyle(TextInputStyle.Short).setRequired(false);
+  if (config?.shopPhone) phoneInput.setValue(config.shopPhone);
+
+  const messageInput = new TextInputBuilder()
+    .setCustomId("thankYouMessage")
+    .setLabel("Message de remerciement")
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false);
+  if (config?.shopThankYouMessage) messageInput.setValue(config.shopThankYouMessage);
+
+  const truckCapacityInput = new TextInputBuilder()
+    .setCustomId("truckCapacityKg")
+    .setLabel("Capacité d'un camion (kg)")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false);
+  if (config?.truckCapacityGrams) truckCapacityInput.setValue(String(config.truckCapacityGrams / 1000));
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(ribInput),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(phoneInput),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(messageInput),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(truckCapacityInput)
+  );
+  await interaction.showModal(modal);
+}
+
+async function handleServiceSetShopProfileModal(interaction: Interaction): Promise<void> {
+  if (!interaction.isModalSubmit() || !interaction.guildId || !interaction.channelId) return;
+
+  const rib = interaction.fields.getTextInputValue("rib").trim() || null;
+  const phone = interaction.fields.getTextInputValue("phone").trim() || null;
+  const thankYouMessage = interaction.fields.getTextInputValue("thankYouMessage").trim() || null;
+  const truckCapacityRaw = interaction.fields.getTextInputValue("truckCapacityKg").trim();
+
+  let truckCapacityKg: number | null = null;
+  if (truckCapacityRaw !== "") {
+    truckCapacityKg = Number(truckCapacityRaw);
+    if (!Number.isFinite(truckCapacityKg) || truckCapacityKg <= 0) {
+      await interaction.reply({ content: "Capacité de camion invalide : entre un nombre positif, ou laisse vide.", ephemeral: true });
+      return;
+    }
+  }
+
+  await setShopProfile(interaction.guildId, { rib, phone, thankYouMessage, truckCapacityKg });
+  await refreshServicePanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.reply({ content: "Profil boutique mis à jour.", ephemeral: true });
+}
+
+/**
+ * Clic sur "Définir la bannière" : attend un message avec piece jointe dans ce salon (60s) —
+ * meme contournement que la photo d'un article (les modals ne supportent pas l'upload de fichier).
+ */
+async function handlePanelServiceSetBanner(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId || !interaction.channelId) return;
+
+  const channel = await interaction.client.channels.fetch(interaction.channelId);
+  if (!channel?.isTextBased() || channel.isDMBased()) return;
+
+  await interaction.reply({ content: "Envoie la bannière en message dans ce salon (60 secondes)...", ephemeral: true });
+
+  const collected = await channel
+    .awaitMessages({
+      filter: (m) => m.author.id === interaction.user.id && m.attachments.size > 0,
+      max: 1,
+      time: 60_000,
+    })
+    .catch(() => null);
+
+  const photoMessage = collected?.first();
+  const attachment = photoMessage?.attachments.first();
+  if (!photoMessage || !attachment) {
+    await interaction.editReply({ content: "Aucune image reçue à temps, réessaie avec le bouton." });
+    return;
+  }
+
+  await setShopBanner(interaction.guildId, attachment.url);
+  await photoMessage.delete().catch((error: unknown) => logger.warn("Echec suppression du message banniere dans le panneau", error));
+  await refreshServicePanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.editReply({ content: "Bannière mise à jour." });
+}
+
+/** Clic sur "Retirer la bannière". */
+async function handlePanelServiceClearBanner(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId || !interaction.channelId) return;
+
+  await clearShopBanner(interaction.guildId);
+  await refreshServicePanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.reply({ content: "Bannière retirée.", ephemeral: true });
 }
 
 /** Clic sur "Ajouter un champ" : d'abord choisir l'article concerne. */
@@ -1705,6 +1951,12 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId.startsWith("order:remove-item:")) {
         return await handleOrderRemoveItemButton(interaction, interaction.customId.slice("order:remove-item:".length));
       }
+      if (interaction.customId.startsWith("order:set-delivery:")) {
+        return await handleOrderSetDeliveryButton(interaction, interaction.customId.slice("order:set-delivery:".length));
+      }
+      if (interaction.customId.startsWith("order:set-discount:")) {
+        return await handleOrderSetDiscountButton(interaction, interaction.customId.slice("order:set-discount:".length));
+      }
       if (interaction.customId === "panel:root:tickets") return await handlePanelRootButton(interaction, "TICKETS");
       if (interaction.customId === "panel:root:absences") return await handlePanelRootButton(interaction, "ABSENCES");
       if (interaction.customId === "panel:root:monitoring") return await handlePanelRootButton(interaction, "MONITORING");
@@ -1726,8 +1978,12 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:service:add-item") return await handlePanelServiceAddItem(interaction);
       if (interaction.customId === "panel:service:remove-item") return await handlePanelServiceRemoveItem(interaction);
       if (interaction.customId === "panel:service:set-image") return await handlePanelServiceSetImage(interaction);
+      if (interaction.customId === "panel:service:set-weight") return await handlePanelServiceSetWeight(interaction);
       if (interaction.customId === "panel:service:add-field") return await handlePanelServiceAddField(interaction);
       if (interaction.customId === "panel:service:remove-field") return await handlePanelServiceRemoveField(interaction);
+      if (interaction.customId === "panel:service:set-shop-profile") return await handlePanelServiceSetShopProfile(interaction);
+      if (interaction.customId === "panel:service:set-banner") return await handlePanelServiceSetBanner(interaction);
+      if (interaction.customId === "panel:service:clear-banner") return await handlePanelServiceClearBanner(interaction);
       if (interaction.customId === "panel:recruitment:set-category") return await handlePanelRecruitmentSetCategory(interaction);
       if (interaction.customId === "panel:recruitment:clear-category") return await handlePanelRecruitmentClearCategory(interaction);
       if (interaction.customId === "panel:recruitment:toggle") return await handlePanelRecruitmentToggle(interaction);
@@ -1805,6 +2061,7 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:tickets:set-roles-category") return await handlePanelTicketsSetRolesCategory(interaction);
       if (interaction.customId === "panel:service:remove-item-select") return await handleServiceRemoveItemSelect(interaction);
       if (interaction.customId === "panel:service:set-image-select") return await handleServiceSetImageSelect(interaction);
+      if (interaction.customId === "panel:service:set-weight-select") return await handleServiceSetWeightSelect(interaction);
       if (interaction.customId === "panel:service:add-field-item") return await handleServiceAddFieldItem(interaction);
       if (interaction.customId.startsWith("panel:service:add-field-style:")) {
         return await handleServiceAddFieldStyle(interaction, interaction.customId.slice("panel:service:add-field-style:".length));
@@ -1826,6 +2083,16 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId.startsWith("panel:service:add-field-modal:")) {
         const [itemId, style] = interaction.customId.slice("panel:service:add-field-modal:".length).split(":");
         return await handleServiceAddFieldModal(interaction, itemId, style);
+      }
+      if (interaction.customId.startsWith("panel:service:set-weight-modal:")) {
+        return await handleServiceSetWeightModal(interaction, interaction.customId.slice("panel:service:set-weight-modal:".length));
+      }
+      if (interaction.customId === "panel:service:set-shop-profile-modal") return await handleServiceSetShopProfileModal(interaction);
+      if (interaction.customId.startsWith("order:set-delivery-modal:")) {
+        return await handleOrderSetDeliveryModal(interaction, interaction.customId.slice("order:set-delivery-modal:".length));
+      }
+      if (interaction.customId.startsWith("order:set-discount-modal:")) {
+        return await handleOrderSetDiscountModal(interaction, interaction.customId.slice("order:set-discount-modal:".length));
       }
       if (interaction.customId.startsWith("panel:recruitment:add-question-modal:")) {
         return await handleRecruitmentAddQuestionModal(interaction, interaction.customId.slice("panel:recruitment:add-question-modal:".length));

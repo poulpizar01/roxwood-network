@@ -1,7 +1,14 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Client } from "discord.js";
-import { computeTotal, getOrderByTicket, saveConfirmationMessageId, setInvoiceNumber } from "./orderService.js";
+import {
+  computeGrandTotal,
+  computeTotal,
+  computeTotalWeightGrams,
+  getOrderByTicket,
+  saveConfirmationMessageId,
+  setInvoiceNumber,
+} from "./orderService.js";
 import { getTicketById } from "./ticketService.js";
-import { renderInvoice } from "./invoiceImageService.js";
+import { getGuildConfig } from "./guildConfigService.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -48,11 +55,16 @@ function buildOrderInProgressRow(): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(addMore, confirm);
 }
 
-/** Construit l'embed recapitulatif d'une commande validee (articles, statut, paiement, total). */
+/**
+ * Construit l'embed recapitulatif d'une commande validee (articles, statut, paiement, total).
+ * "Total" reflete deja livraison/reduction si l'un des deux est defini (voir `computeGrandTotal`) ;
+ * le detail (sous-total, livraison, reduction) n'est affiche que si au moins un des deux est
+ * non nul, pour ne pas alourdir l'embed dans le cas courant ou aucun des deux n'est utilise.
+ */
 function buildOrderEmbed(order: OrderWithItems): EmbedBuilder {
-  const total = computeTotal(order);
+  const grandTotal = computeGrandTotal(order);
 
-  return new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setTitle("Commande")
     .setColor(order.paymentStatus === "PAID" ? 0x57f287 : 0x5865f2)
     .setDescription(
@@ -62,8 +74,18 @@ function buildOrderEmbed(order: OrderWithItems): EmbedBuilder {
     .addFields(
       { name: "Statut", value: `**${orderStatusLabel(order.status)}**`, inline: true },
       { name: "Paiement", value: order.paymentStatus === "PAID" ? "**Payée** ✅" : "**Non payée**", inline: true },
-      { name: "Total", value: `${total.toLocaleString("fr-FR")} $`, inline: true }
+      { name: "Total", value: `${grandTotal.toLocaleString("fr-FR")} $`, inline: true }
     );
+
+  if (order.deliveryFee !== 0 || order.discount !== 0) {
+    embed.addFields(
+      { name: "Sous-total articles", value: `${computeTotal(order).toLocaleString("fr-FR")} $`, inline: true },
+      { name: "Livraison", value: `${order.deliveryFee.toLocaleString("fr-FR")} $`, inline: true },
+      { name: "Réduction", value: `${order.discount.toLocaleString("fr-FR")} $`, inline: true }
+    );
+  }
+
+  return embed;
 }
 
 /**
@@ -81,7 +103,11 @@ function buildOrderActionRows(ticketId: string): ActionRowBuilder<ButtonBuilder>
     new ButtonBuilder().setCustomId("order:add-more").setLabel("Ajouter un article").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`order:remove-item:${ticketId}`).setLabel("Retirer un article").setStyle(ButtonStyle.Danger)
   );
-  return [row1, row2];
+  const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`order:set-delivery:${ticketId}`).setLabel("Livraison").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`order:set-discount:${ticketId}`).setLabel("Réduction").setStyle(ButtonStyle.Secondary)
+  );
+  return [row1, row2, row3];
 }
 
 /**
@@ -123,8 +149,70 @@ export async function upsertOrderMessage(client: Client, ticketId: string): Prom
  */
 export const refreshOrderMessage = upsertOrderMessage;
 
+/** Formate un poids en grammes pour affichage (ex: `120.0kg`), meme convention decimale que la reference fournie par l'utilisateur. */
+function formatWeight(grams: number): string {
+  return `${(grams / 1000).toFixed(1)}kg`;
+}
+
 /**
- * Genere l'image de facture et la poste dans le salon du ticket. Reutilise le numero de
+ * Construit l'embed de facture : articles, sous-total/livraison/reduction/total, et le
+ * "profil boutique" configure par la guilde (RIB, telephone, message de remerciement,
+ * banniere — voir `panel:service:set-shop-profile`). Poids total/camions requis ne sont
+ * affiches que si au moins un article de la commande a un poids configure (voir
+ * `computeTotalWeightGrams`) — sinon ces deux champs sont omis plutot que d'afficher "0kg".
+ */
+async function buildInvoiceEmbed(
+  guildId: string,
+  guildName: string,
+  customerLabel: string,
+  order: OrderWithItems,
+  invoiceNumber: string
+): Promise<EmbedBuilder> {
+  const config = await getGuildConfig(guildId);
+  const subtotal = computeTotal(order);
+  const grandTotal = computeGrandTotal(order);
+  const totalWeightGrams = computeTotalWeightGrams(order);
+
+  const embed = new EmbedBuilder()
+    .setTitle(guildName)
+    .setColor(order.paymentStatus === "PAID" ? 0x57f287 : 0x5865f2)
+    .setDescription(`**Facture n° ${invoiceNumber}**`)
+    .addFields(
+      { name: "Entreprise", value: guildName, inline: true },
+      { name: "Commande passée par", value: customerLabel, inline: true },
+      { name: "Date", value: order.createdAt.toLocaleDateString("fr-FR"), inline: true },
+      {
+        name: "Articles de la commande",
+        value:
+          order.items.map((i) => `- ${i.quantity}x ${i.name} — ${(i.unitPrice * i.quantity).toLocaleString("fr-FR")}$`).join("\n") ||
+          "Aucun article",
+      },
+      { name: "Sous-total", value: `${subtotal.toLocaleString("fr-FR")}$`, inline: true },
+      { name: "Livraison facturée", value: `${order.deliveryFee.toLocaleString("fr-FR")}$`, inline: true },
+      { name: "Réduction appliquée", value: `${order.discount.toLocaleString("fr-FR")}$`, inline: true },
+      { name: "TOTAL À PAYER", value: `**${grandTotal.toLocaleString("fr-FR")}$**` }
+    );
+
+  if (totalWeightGrams !== null) {
+    embed.addFields({ name: "Poids total", value: formatWeight(totalWeightGrams), inline: true });
+    if (config?.truckCapacityGrams) {
+      embed.addFields({ name: "Camions requis", value: String(Math.ceil(totalWeightGrams / config.truckCapacityGrams)), inline: true });
+    }
+  }
+
+  if (config?.shopRib) embed.addFields({ name: "RIB pour le règlement", value: config.shopRib });
+
+  const footerLines = [config?.shopThankYouMessage, config?.shopPhone ? `Téléphone : ${config.shopPhone}` : null].filter(
+    (line): line is string => Boolean(line)
+  );
+  if (footerLines.length > 0) embed.setFooter({ text: footerLines.join("\n") });
+  if (config?.shopBannerUrl) embed.setImage(config.shopBannerUrl);
+
+  return embed;
+}
+
+/**
+ * Construit et poste l'embed de facture dans le salon du ticket. Reutilise le numero de
  * facture existant s'il y en a deja un, pour eviter que renvoyer la facture n'en change
  * le numero. Resout le pseudo affiche du client (fallback "Client" si le membre a quitte
  * le serveur ou si l'opener n'a pas pu etre determine a l'ouverture du ticket).
@@ -154,22 +242,10 @@ export async function sendInvoiceForOrder(
     logger.warn(`Impossible de recuperer la guilde ${guildId} pour la facture`, error);
   }
 
-  const buffer = await renderInvoice({
-    invoiceNumber,
-    guildName,
-    customerLabel,
-    items: order.items.map((i) => ({
-      name: i.name,
-      unitPrice: i.unitPrice,
-      quantity: i.quantity,
-      answers: i.answers.map((a) => ({ question: a.question, answer: a.answer })),
-    })),
-    paymentStatus: order.paymentStatus,
-    createdAt: order.createdAt,
-  });
+  const embed = await buildInvoiceEmbed(guildId, guildName, customerLabel, order, invoiceNumber);
 
   const channel = await client.channels.fetch(ticket.channelId);
   if (channel?.isTextBased() && !channel.isDMBased()) {
-    await channel.send({ files: [{ attachment: buffer, name: `facture-${invoiceNumber}.png` }] });
+    await channel.send({ embeds: [embed] });
   }
 }

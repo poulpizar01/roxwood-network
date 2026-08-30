@@ -49,6 +49,7 @@ export async function addItemFromAnswers(
       catalogItemId: catalogItem.id,
       name: catalogItem.name,
       unitPrice: catalogItem.price,
+      weightGrams: catalogItem.weightGrams,
       quantity,
       answers: {
         create: otherAnswers.map((a) => ({ question: a.field.label, answer: a.value })),
@@ -70,6 +71,7 @@ export async function addItem(orderId: string, catalogItem: CatalogItem, quantit
       catalogItemId: catalogItem.id,
       name: catalogItem.name,
       unitPrice: catalogItem.price,
+      weightGrams: catalogItem.weightGrams,
       quantity: Math.max(1, quantity),
     },
   });
@@ -107,6 +109,16 @@ export async function setPaymentStatus(orderId: string, paymentStatus: PaymentSt
   return prisma.serviceOrder.update({ where: { id: orderId }, data: { paymentStatus } });
 }
 
+/** Definit les frais de livraison factures (montant absolu, ajoute au total). */
+export async function setDeliveryFee(orderId: string, deliveryFee: number) {
+  return prisma.serviceOrder.update({ where: { id: orderId }, data: { deliveryFee } });
+}
+
+/** Definit la reduction accordee (montant absolu, soustrait du total). */
+export async function setDiscount(orderId: string, discount: number) {
+  return prisma.serviceOrder.update({ where: { id: orderId }, data: { discount } });
+}
+
 /** Recupere une commande par son id, avec ses lignes et les reponses de chacune. */
 export async function getOrderWithItems(orderId: string) {
   return prisma.serviceOrder.findUnique({
@@ -123,9 +135,30 @@ export async function getOrderByTicket(ticketId: string) {
   });
 }
 
-/** Calcule le total d'une commande (somme de `unitPrice * quantity` sur toutes les lignes). */
+/** Calcule le sous-total d'une commande (somme de `unitPrice * quantity` sur toutes les lignes, hors livraison/reduction). */
 export function computeTotal(order: { items: { unitPrice: number; quantity: number }[] }): number {
   return order.items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+}
+
+/** Calcule le total final d'une commande : sous-total + livraison - reduction (voir la facture). */
+export function computeGrandTotal(order: {
+  items: { unitPrice: number; quantity: number }[];
+  deliveryFee: number;
+  discount: number;
+}): number {
+  return computeTotal(order) + order.deliveryFee - order.discount;
+}
+
+/**
+ * Calcule le poids total d'une commande (grammes), a partir des lignes qui ont un poids
+ * configure — celles qui n'en ont pas sont ignorees plutot que de compter comme 0 kg. Retourne
+ * `null` si aucune ligne n'a de poids configure (voir `buildInvoiceEmbed` : le champ "Poids
+ * total" est alors omis entierement de la facture plutot que d'afficher "0kg" trompeur).
+ */
+export function computeTotalWeightGrams(order: { items: { weightGrams: number | null; quantity: number }[] }): number | null {
+  const weighted = order.items.filter((item) => item.weightGrams !== null);
+  if (weighted.length === 0) return null;
+  return weighted.reduce((sum, item) => sum + item.weightGrams! * item.quantity, 0);
 }
 
 /**

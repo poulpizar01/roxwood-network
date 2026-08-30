@@ -15,9 +15,7 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-# fontconfig + dejavu : sans elles, @napi-rs/canvas ne trouve aucune police et le texte ne s'affiche pas
-# (les formes/couleurs se dessinent normalement, seul le texte est silencieusement absent)
-RUN apk add --no-cache openssl fontconfig ttf-dejavu
+RUN apk add --no-cache openssl
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev

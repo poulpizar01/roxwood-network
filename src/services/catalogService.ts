@@ -62,6 +62,15 @@ export async function setItemImage(guildId: string, id: string, imageUrl: string
 }
 
 /**
+ * Definit (ou retire, si `weightGrams` vaut `null`) le poids unitaire d'un article, utilise
+ * pour calculer le poids total/nombre de camions requis sur la facture (voir `orderLogService.ts`).
+ * Optionnel : un article sans poids configure est simplement ignore dans ce calcul.
+ */
+export async function setItemWeight(guildId: string, id: string, weightGrams: number | null) {
+  await prisma.catalogItem.updateMany({ where: { id, guildId }, data: { weightGrams } });
+}
+
+/**
  * Recupere un article (avec ses champs personnalises, ordonnes par `position`) en verifiant
  * qu'il appartient bien a la guilde donnee — evite qu'un id d'article d'un autre serveur
  * puisse etre utilise par erreur ou malveillance.

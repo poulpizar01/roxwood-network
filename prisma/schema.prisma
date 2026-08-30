@@ -52,6 +52,19 @@ model GuildConfig {
   /// Id du message de statut recrutement, pour l'editer en place plutot que le reposter a
   /// chaque bascule. `null` tant que jamais poste.
   recruitmentStatusMessageId String?
+  /// RIB affiche sur les factures pour le reglement (coordonnees bancaires in-game).
+  shopRib String?
+  /// Numero de telephone de la boutique, affiche en pied de facture.
+  shopPhone String?
+  /// URL de la banniere affichee en bas de chaque facture (image fixe, configuree une fois
+  /// dans le panneau plutot que ressaisie a chaque facture).
+  shopBannerUrl String?
+  /// Message de remerciement affiche en pied de facture (ex: "X vous remercie pour votre confiance").
+  shopThankYouMessage String?
+  /// Capacite d'un camion en grammes, utilisee pour calculer le nombre de camions requis a
+  /// partir du poids total d'une commande (voir `CatalogItem.weightGrams`). `null` = "camions
+  /// requis" jamais affiche sur la facture, meme si des articles ont un poids configure.
+  truckCapacityGrams Int?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -262,6 +275,9 @@ model CatalogItem {
   price       Int
   /// URL de la photo de l'article (attachment Discord au moment de `/catalog add`).
   imageUrl    String?
+  /// Poids unitaire en grammes, optionnel. Si aucun article d'une commande n'a de poids
+  /// configure, "poids total"/"camions requis" sont omis de la facture (voir `orderLogService.ts`).
+  weightGrams Int?
   /// Permet de retirer un article du menu deroulant client sans supprimer son historique de commandes.
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
@@ -317,6 +333,12 @@ model ServiceOrder {
   /// True une fois que le client a clique "Valider la commande" — determine quel style
   /// d'embed/boutons afficher sur le message de commande (composition vs suivi/facturation).
   confirmed     Boolean       @default(false)
+  /// Frais de livraison factures en plus du sous-total des articles, definis manuellement par
+  /// le staff (bouton "Livraison"). 0 = aucun frais.
+  deliveryFee   Int           @default(0)
+  /// Reduction accordee, soustraite du sous-total (montant absolu, pas un pourcentage),
+  /// definie manuellement par le staff (bouton "Réduction"). 0 = aucune reduction.
+  discount      Int           @default(0)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -334,6 +356,10 @@ model OrderItem {
   catalogItemId String?
   name          String
   unitPrice     Int
+  /// Instantane du poids unitaire (grammes) de l'article catalogue au moment de la commande,
+  /// meme raisonnement que `name`/`unitPrice` : la facture reste correcte meme si le poids
+  /// catalogue change ou si l'article est supprime ensuite.
+  weightGrams   Int?
   quantity      Int     @default(1)
 
   order       ServiceOrder      @relation(fields: [orderId], references: [id], onDelete: Cascade)

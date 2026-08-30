@@ -300,6 +300,43 @@ export async function clearMonitoringChannel(guildId: string, type: MonitoringLo
   return refresh(guildId);
 }
 
+/**
+ * Definit (remplace entierement) le profil boutique affiche en pied des factures : RIB,
+ * telephone, message de remerciement, capacite d'un camion (en kg, convertie en grammes pour
+ * le stockage — voir `truckCapacityGrams`). Chaque champ absent/vide efface la valeur
+ * existante (`null`) — un seul modal regroupe les 4 champs, voir `panel:service:set-shop-profile`.
+ */
+export async function setShopProfile(
+  guildId: string,
+  data: { rib: string | null; phone: string | null; thankYouMessage: string | null; truckCapacityKg: number | null }
+): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.guildConfig.update({
+    where: { guildId },
+    data: {
+      shopRib: data.rib,
+      shopPhone: data.phone,
+      shopThankYouMessage: data.thankYouMessage,
+      truckCapacityGrams: data.truckCapacityKg !== null ? Math.round(data.truckCapacityKg * 1000) : null,
+    },
+  });
+  return refresh(guildId);
+}
+
+/** Definit la banniere affichee en bas de chaque facture. */
+export async function setShopBanner(guildId: string, url: string): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.guildConfig.update({ where: { guildId }, data: { shopBannerUrl: url } });
+  return refresh(guildId);
+}
+
+/** Retire la banniere des factures. */
+export async function clearShopBanner(guildId: string): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.guildConfig.update({ where: { guildId }, data: { shopBannerUrl: null } });
+  return refresh(guildId);
+}
+
 /** Definit la categorie vers laquelle deplacer le salon d'une candidature acceptee. */
 export async function setRecruitmentAcceptedCategory(guildId: string, categoryId: string): Promise<GuildConfigWithCategories> {
   await ensureGuildConfig(guildId);
