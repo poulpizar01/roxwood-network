@@ -114,9 +114,9 @@ export async function setDeliveryFee(orderId: string, deliveryFee: number) {
   return prisma.serviceOrder.update({ where: { id: orderId }, data: { deliveryFee } });
 }
 
-/** Definit la reduction accordee (montant absolu, soustrait du total). */
-export async function setDiscount(orderId: string, discount: number) {
-  return prisma.serviceOrder.update({ where: { id: orderId }, data: { discount } });
+/** Definit la reduction accordee, en pourcentage du sous-total (0-100). */
+export async function setDiscountPercent(orderId: string, discountPercent: number) {
+  return prisma.serviceOrder.update({ where: { id: orderId }, data: { discountPercent } });
 }
 
 /** Recupere une commande par son id, avec ses lignes et les reponses de chacune. */
@@ -140,13 +140,18 @@ export function computeTotal(order: { items: { unitPrice: number; quantity: numb
   return order.items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
 }
 
+/** Calcule le montant de la reduction (pourcentage du sous-total, arrondi). */
+export function computeDiscountAmount(order: { items: { unitPrice: number; quantity: number }[]; discountPercent: number }): number {
+  return Math.round((computeTotal(order) * order.discountPercent) / 100);
+}
+
 /** Calcule le total final d'une commande : sous-total + livraison - reduction (voir la facture). */
 export function computeGrandTotal(order: {
   items: { unitPrice: number; quantity: number }[];
   deliveryFee: number;
-  discount: number;
+  discountPercent: number;
 }): number {
-  return computeTotal(order) + order.deliveryFee - order.discount;
+  return computeTotal(order) + order.deliveryFee - computeDiscountAmount(order);
 }
 
 /**

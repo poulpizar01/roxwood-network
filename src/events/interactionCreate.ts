@@ -43,7 +43,7 @@ import {
   markConfirmed,
   removeItem as removeOrderItem,
   setDeliveryFee,
-  setDiscount,
+  setDiscountPercent,
   setPaymentStatus,
   setStatus as setOrderStatus,
 } from "../services/orderService.js";
@@ -676,18 +676,18 @@ async function handleOrderSetDiscountButton(interaction: Interaction, ticketId: 
 
   const order = await getOrderByTicket(ticketId);
   const modal = new ModalBuilder().setCustomId(`order:set-discount-modal:${ticketId}`).setTitle("Réduction");
-  const amountInput = new TextInputBuilder().setCustomId("amount").setLabel("Montant").setStyle(TextInputStyle.Short).setRequired(true);
-  amountInput.setValue(String(order?.discount ?? 0));
-  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(amountInput));
+  const percentInput = new TextInputBuilder().setCustomId("percent").setLabel("Pourcentage (0-100)").setStyle(TextInputStyle.Short).setRequired(true);
+  percentInput.setValue(String(order?.discountPercent ?? 0));
+  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(percentInput));
   await interaction.showModal(modal);
 }
 
 async function handleOrderSetDiscountModal(interaction: Interaction, ticketId: string): Promise<void> {
   if (!interaction.isModalSubmit()) return;
 
-  const amount = Number(interaction.fields.getTextInputValue("amount"));
-  if (!Number.isInteger(amount) || amount < 0) {
-    await interaction.reply({ content: "Montant invalide : entre un nombre entier positif.", ephemeral: true });
+  const percent = Number(interaction.fields.getTextInputValue("percent"));
+  if (!Number.isInteger(percent) || percent < 0 || percent > 100) {
+    await interaction.reply({ content: "Pourcentage invalide : entre un nombre entier entre 0 et 100.", ephemeral: true });
     return;
   }
 
@@ -697,9 +697,9 @@ async function handleOrderSetDiscountModal(interaction: Interaction, ticketId: s
     return;
   }
 
-  await setDiscount(order.id, amount);
+  await setDiscountPercent(order.id, percent);
   await upsertOrderMessage(interaction.client, ticketId);
-  await interaction.reply({ content: `Réduction définie sur ${amount.toLocaleString("fr-FR")} $.`, ephemeral: true });
+  await interaction.reply({ content: `Réduction définie sur ${percent}%.`, ephemeral: true });
 }
 
 /**

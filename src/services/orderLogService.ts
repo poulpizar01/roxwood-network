@@ -1,5 +1,6 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Client } from "discord.js";
 import {
+  computeDiscountAmount,
   computeGrandTotal,
   computeTotal,
   computeTotalWeightGrams,
@@ -77,11 +78,15 @@ function buildOrderEmbed(order: OrderWithItems): EmbedBuilder {
       { name: "Total", value: `${grandTotal.toLocaleString("fr-FR")} $`, inline: true }
     );
 
-  if (order.deliveryFee !== 0 || order.discount !== 0) {
+  if (order.deliveryFee !== 0 || order.discountPercent !== 0) {
     embed.addFields(
       { name: "Sous-total articles", value: `${computeTotal(order).toLocaleString("fr-FR")} $`, inline: true },
       { name: "Livraison", value: `${order.deliveryFee.toLocaleString("fr-FR")} $`, inline: true },
-      { name: "Réduction", value: `${order.discount.toLocaleString("fr-FR")} $`, inline: true }
+      {
+        name: "Réduction",
+        value: `${order.discountPercent}% (-${computeDiscountAmount(order).toLocaleString("fr-FR")} $)`,
+        inline: true,
+      }
     );
   }
 
@@ -171,6 +176,7 @@ async function buildInvoiceEmbed(
   const config = await getGuildConfig(guildId);
   const subtotal = computeTotal(order);
   const grandTotal = computeGrandTotal(order);
+  const discountAmount = computeDiscountAmount(order);
   const totalWeightGrams = computeTotalWeightGrams(order);
 
   const embed = new EmbedBuilder()
@@ -189,7 +195,7 @@ async function buildInvoiceEmbed(
       },
       { name: "Sous-total", value: `${subtotal.toLocaleString("fr-FR")}$`, inline: true },
       { name: "Livraison facturée", value: `${order.deliveryFee.toLocaleString("fr-FR")}$`, inline: true },
-      { name: "Réduction appliquée", value: `${order.discount.toLocaleString("fr-FR")}$`, inline: true },
+      { name: "Réduction appliquée", value: `${order.discountPercent}% (-${discountAmount.toLocaleString("fr-FR")}$)`, inline: true },
       { name: "TOTAL À PAYER", value: `**${grandTotal.toLocaleString("fr-FR")}$**` }
     );
 

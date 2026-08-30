@@ -336,9 +336,11 @@ model ServiceOrder {
   /// Frais de livraison factures en plus du sous-total des articles, definis manuellement par
   /// le staff (bouton "Livraison"). 0 = aucun frais.
   deliveryFee   Int           @default(0)
-  /// Reduction accordee, soustraite du sous-total (montant absolu, pas un pourcentage),
-  /// definie manuellement par le staff (bouton "Réduction"). 0 = aucune reduction.
-  discount      Int           @default(0)
+  /// Reduction accordee, en pourcentage du sous-total (0-100), definie manuellement par le
+  /// staff (bouton "Réduction"). 0 = aucune reduction. Le montant deduit est recalcule a
+  /// l'affichage (voir `computeGrandTotal`), jamais fige — coherent tant que le sous-total
+  /// n'a pas change depuis, mais recalcule si des articles sont ajoutes/retires ensuite.
+  discountPercent Int         @default(0)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
