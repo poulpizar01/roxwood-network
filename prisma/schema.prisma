@@ -37,6 +37,21 @@ model GuildConfig {
   monitoringJobId String?
   /// Role Discord ajoute a la prise de service, retire a la fin de service.
   onDutyRoleId    String?
+  /// Categorie Discord vers laquelle deplacer le salon d'un ticket RECRUITMENT quand sa
+  /// candidature passe a ACCEPTED (manuellement via le bouton Statut, ou automatiquement via
+  /// le log monitoring RECRUITMENT "embauche"). `null` = pas de deplacement automatique.
+  recruitmentAcceptedCategoryId String?
+  /// Role Discord ajoute au candidat des que sa candidature passe a ACCEPTED (meme declencheurs
+  /// que ci-dessus). `null` = pas d'ajout automatique.
+  recruitmentAcceptedRoleId     String?
+  /// Salon ou un message permanent affiche l'etat ouvert/ferme des recrutements (mis a jour en
+  /// place a chaque bascule) — distinct de `recruitmentLogChannelId` (suivi des candidatures
+  /// individuelles, reserve au staff) : celui-ci peut etre rendu visible a tout le monde.
+  /// `null` = pas de message de statut public.
+  recruitmentStatusChannelId String?
+  /// Id du message de statut recrutement, pour l'editer en place plutot que le reposter a
+  /// chaque bascule. `null` tant que jamais poste.
+  recruitmentStatusMessageId String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

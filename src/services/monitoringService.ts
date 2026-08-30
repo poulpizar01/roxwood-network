@@ -4,7 +4,7 @@ import { prisma } from "../db/prisma.js";
 import { getGuildConfig } from "./guildConfigService.js";
 import { findLatestRecruitmentTicketByOpener } from "./ticketService.js";
 import { getApplication, setStatus as setApplicationStatus } from "./recruitmentService.js";
-import { refreshRecruitmentLogMessage } from "./recruitmentLogService.js";
+import { applyRecruitmentAcceptance, refreshRecruitmentLogMessage } from "./recruitmentLogService.js";
 import { recordSafeMovement } from "./monitoringSafeService.js";
 import { dispatchWebhook, type WebhookEventType } from "./webhookDispatcher.js";
 import {
@@ -154,6 +154,7 @@ async function applySideEffect(
 
     await setApplicationStatus(ticket.id, "ACCEPTED");
     await refreshRecruitmentLogMessage(message.client, ticket.id);
+    await applyRecruitmentAcceptance(message.client, ticket.id);
     return;
   }
 

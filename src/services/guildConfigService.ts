@@ -317,3 +317,64 @@ export async function clearMonitoringChannel(guildId: string, type: MonitoringLo
   await prisma.monitoringChannelConfig.deleteMany({ where: { guildId, type } });
   return refresh(guildId);
 }
+
+/** Definit la categorie vers laquelle deplacer le salon d'une candidature acceptee. */
+export async function setRecruitmentAcceptedCategory(guildId: string, categoryId: string): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.guildConfig.update({ where: { guildId }, data: { recruitmentAcceptedCategoryId: categoryId } });
+  return refresh(guildId);
+}
+
+/** Retire le deplacement automatique de salon a l'acceptation d'une candidature. */
+export async function clearRecruitmentAcceptedCategory(guildId: string): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.guildConfig.update({ where: { guildId }, data: { recruitmentAcceptedCategoryId: null } });
+  return refresh(guildId);
+}
+
+/** Definit le role ajoute automatiquement au candidat quand sa candidature est acceptee. */
+export async function setRecruitmentAcceptedRole(guildId: string, roleId: string): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.guildConfig.update({ where: { guildId }, data: { recruitmentAcceptedRoleId: roleId } });
+  return refresh(guildId);
+}
+
+/** Retire l'ajout automatique de role a l'acceptation d'une candidature. */
+export async function clearRecruitmentAcceptedRole(guildId: string): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.guildConfig.update({ where: { guildId }, data: { recruitmentAcceptedRoleId: null } });
+  return refresh(guildId);
+}
+
+/**
+ * Definit le salon ou poster le message permanent de statut des recrutements. Le message
+ * lui-meme (cree/edite en place) est gere par `refreshRecruitmentStatusMessage` (voir
+ * `recruitmentLogService.ts`), pas ici — cette fonction ne touche que la configuration.
+ */
+export async function setRecruitmentStatusChannel(guildId: string, channelId: string): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  // Changer de salon invalide l'ancien messageId (il vit dans l'ancien salon) : un nouveau
+  // message sera poste dans le nouveau salon au prochain refresh.
+  await prisma.guildConfig.update({
+    where: { guildId },
+    data: { recruitmentStatusChannelId: channelId, recruitmentStatusMessageId: null },
+  });
+  return refresh(guildId);
+}
+
+/** Retire le salon de statut recrutement : arrete les mises a jour, ne supprime pas le dernier message poste. */
+export async function clearRecruitmentStatusChannel(guildId: string): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.guildConfig.update({
+    where: { guildId },
+    data: { recruitmentStatusChannelId: null, recruitmentStatusMessageId: null },
+  });
+  return refresh(guildId);
+}
+
+/** Memorise l'id du message de statut recrutement, pour pouvoir l'editer en place la prochaine fois. */
+export async function setRecruitmentStatusMessageId(guildId: string, messageId: string): Promise<GuildConfigWithCategories> {
+  await ensureGuildConfig(guildId);
+  await prisma.guildConfig.update({ where: { guildId }, data: { recruitmentStatusMessageId: messageId } });
+  return refresh(guildId);
+}

@@ -290,17 +290,37 @@ export async function buildRecruitmentPanelEmbed(guildId: string): Promise<Embed
         name: "Salon de suivi des candidatures",
         value: config?.recruitmentLogChannelId ? `<#${config.recruitmentLogChannelId}>` : "Salon du ticket (par défaut)",
       },
+      {
+        name: "Salon de statut public",
+        value: config?.recruitmentStatusChannelId ? `<#${config.recruitmentStatusChannelId}>` : "Non configuré",
+      },
+      {
+        name: "Catégorie à l'acceptation",
+        value: config?.recruitmentAcceptedCategoryId ? `<#${config.recruitmentAcceptedCategoryId}>` : "Non configurée",
+      },
+      {
+        name: "Rôle à l'acceptation",
+        value: config?.recruitmentAcceptedRoleId ? `<@&${config.recruitmentAcceptedRoleId}>` : "Non configuré",
+      },
       { name: "Questions du formulaire", value: questionsText }
     );
 }
 
 /**
  * Boutons du message dedie "Recrutement" : categorie (bouton unique Definir/Retirer selon
- * l'etat courant), bascule ouvert/ferme (meme principe), salon de suivi (meme principe —
- * "Retirer" revient au comportement par defaut : recap poste dans le salon du ticket), et
- * gestion des questions du formulaire.
+ * l'etat courant), bascule ouvert/ferme + salon de statut public (meme message edite en place
+ * a chaque bascule, voir `refreshRecruitmentStatusMessage`), salon de suivi des candidatures +
+ * effets a l'acceptation (categorie de destination, role), et gestion des questions du
+ * formulaire. 4 lignes au total (limite Discord : 5 lignes par message).
  */
-export function buildRecruitmentPanelRows(open: boolean, categoryId: string | null, logChannelId: string | null): ActionRowBuilder<ButtonBuilder>[] {
+export function buildRecruitmentPanelRows(
+  open: boolean,
+  categoryId: string | null,
+  logChannelId: string | null,
+  statusChannelId: string | null,
+  acceptedCategoryId: string | null,
+  acceptedRoleId: string | null
+): ActionRowBuilder<ButtonBuilder>[] {
   const categoryRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(categoryId ? "panel:recruitment:clear-category" : "panel:recruitment:set-category")
@@ -311,19 +331,31 @@ export function buildRecruitmentPanelRows(open: boolean, categoryId: string | nu
     new ButtonBuilder()
       .setCustomId("panel:recruitment:toggle")
       .setLabel(open ? "Fermer les recrutements" : "Ouvrir les recrutements")
-      .setStyle(open ? ButtonStyle.Danger : ButtonStyle.Success)
+      .setStyle(open ? ButtonStyle.Danger : ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(statusChannelId ? "panel:recruitment:clear-status-channel" : "panel:recruitment:set-status-channel")
+      .setLabel(statusChannelId ? "Retirer le salon de statut" : "Définir le salon de statut")
+      .setStyle(statusChannelId ? ButtonStyle.Danger : ButtonStyle.Success)
   );
-  const logChannelRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+  const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(logChannelId ? "panel:recruitment:clear-log-channel" : "panel:recruitment:set-log-channel")
       .setLabel(logChannelId ? "Retirer le salon de suivi" : "Définir le salon de suivi")
-      .setStyle(logChannelId ? ButtonStyle.Danger : ButtonStyle.Success)
+      .setStyle(logChannelId ? ButtonStyle.Danger : ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(acceptedCategoryId ? "panel:recruitment:clear-accepted-category" : "panel:recruitment:set-accepted-category")
+      .setLabel(acceptedCategoryId ? "Retirer la catégorie d'acceptation" : "Définir la catégorie d'acceptation")
+      .setStyle(acceptedCategoryId ? ButtonStyle.Danger : ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(acceptedRoleId ? "panel:recruitment:clear-accepted-role" : "panel:recruitment:set-accepted-role")
+      .setLabel(acceptedRoleId ? "Retirer le rôle d'acceptation" : "Définir le rôle d'acceptation")
+      .setStyle(acceptedRoleId ? ButtonStyle.Danger : ButtonStyle.Success)
   );
-  const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+  const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("panel:recruitment:add-question").setLabel("Ajouter une question").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("panel:recruitment:remove-question").setLabel("Retirer une question").setStyle(ButtonStyle.Danger)
   );
-  return [categoryRow, row1, logChannelRow, row2];
+  return [categoryRow, row1, row2, row3];
 }
 
 /**
@@ -474,7 +506,14 @@ export async function refreshRecruitmentPanelMessage(client: Client, guildId: st
   const categoryId = config?.ticketCategories.find((c) => c.type === "RECRUITMENT")?.categoryId ?? null;
   await upsertPanelMessage(client, guildId, "RECRUITMENT", channelId, {
     embeds: [await buildRecruitmentPanelEmbed(guildId)],
-    components: buildRecruitmentPanelRows(config?.recruitmentOpen ?? true, categoryId, config?.recruitmentLogChannelId ?? null),
+    components: buildRecruitmentPanelRows(
+      config?.recruitmentOpen ?? true,
+      categoryId,
+      config?.recruitmentLogChannelId ?? null,
+      config?.recruitmentStatusChannelId ?? null,
+      config?.recruitmentAcceptedCategoryId ?? null,
+      config?.recruitmentAcceptedRoleId ?? null
+    ),
   });
 }
 

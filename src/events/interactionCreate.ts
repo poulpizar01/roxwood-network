@@ -17,10 +17,12 @@ import { getTicketByChannel, getTicketById, markTicketClosed } from "../services
 import { assignRecruiter, saveAnswers, saveLogMessageRef, setStatus as setApplicationStatus } from "../services/recruitmentService.js";
 import {
   RECRUITMENT_STATUS_CHOICES,
+  applyRecruitmentAcceptance,
   buildRecruitmentActionRow,
   buildRecruitmentEmbed,
   recruitmentStatusLabel,
   refreshRecruitmentLogMessage,
+  refreshRecruitmentStatusMessage,
   resolveRecruitmentLogChannel,
 } from "../services/recruitmentLogService.js";
 import {
@@ -49,6 +51,9 @@ import {
   clearAbsenceReviewChannel,
   clearCategoryForType,
   clearMonitoringChannel,
+  clearRecruitmentAcceptedCategory,
+  clearRecruitmentAcceptedRole,
+  clearRecruitmentStatusChannel,
   getGuildConfig,
   isAbsenceApprover,
   isTicketManager,
@@ -59,8 +64,11 @@ import {
   setMonitoringChannel,
   setMonitoringJobId,
   setOnDutyRole,
+  setRecruitmentAcceptedCategory,
+  setRecruitmentAcceptedRole,
   setRecruitmentLogChannel,
   setRecruitmentOpen,
+  setRecruitmentStatusChannel,
 } from "../services/guildConfigService.js";
 import {
   addQuestion as addRecruitmentQuestion,
@@ -306,6 +314,10 @@ async function handleRecruitmentSetStatus(interaction: Interaction, ticketId: st
   const status = interaction.values[0] as (typeof RECRUITMENT_STATUS_CHOICES)[number]["value"];
   await setApplicationStatus(ticketId, status);
   await refreshRecruitmentLogMessage(interaction.client, ticketId);
+
+  if (status === "ACCEPTED") {
+    await applyRecruitmentAcceptance(interaction.client, ticketId);
+  }
 
   if (status === "REJECTED") {
     await closeTicketIfRejected(interaction, ticketId);
@@ -1249,6 +1261,7 @@ async function handlePanelRecruitmentToggle(interaction: Interaction): Promise<v
   const nextOpen = !(config?.recruitmentOpen ?? true);
   await setRecruitmentOpen(interaction.guildId, nextOpen);
   await refreshRecruitmentPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await refreshRecruitmentStatusMessage(interaction.client, interaction.guildId);
   await interaction.reply({
     content: nextOpen
       ? "Recrutements ouverts : les nouveaux tickets affichent le formulaire de candidature."
@@ -1285,6 +1298,94 @@ async function handlePanelRecruitmentClearLogChannel(interaction: Interaction): 
   await setRecruitmentLogChannel(interaction.guildId, null);
   await refreshRecruitmentPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
   await interaction.reply({ content: "Salon de suivi retiré, le récap sera posté dans le salon de chaque ticket.", ephemeral: true });
+}
+
+/** Clic sur "Définir le salon de statut" : menu natif Discord filtre aux salons textuels. */
+async function handlePanelRecruitmentSetStatusChannel(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton()) return;
+
+  const select = new ChannelSelectMenuBuilder()
+    .setCustomId("panel:recruitment:set-status-channel-select")
+    .setPlaceholder("Choisir un salon")
+    .addChannelTypes(ChannelType.GuildText);
+  const row = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(select);
+  await interaction.reply({ components: [row], ephemeral: true });
+}
+
+async function handleRecruitmentSetStatusChannelSelect(interaction: Interaction): Promise<void> {
+  if (!interaction.isChannelSelectMenu() || !interaction.guildId || !interaction.channelId) return;
+
+  const channelId = interaction.values[0];
+  await setRecruitmentStatusChannel(interaction.guildId, channelId);
+  await refreshRecruitmentPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await refreshRecruitmentStatusMessage(interaction.client, interaction.guildId);
+  await interaction.update({ content: `Salon de statut défini sur <#${channelId}>.`, components: [] });
+}
+
+/** Clic sur "Retirer le salon de statut" : arrete les mises a jour (le dernier message poste reste tel quel). */
+async function handlePanelRecruitmentClearStatusChannel(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId || !interaction.channelId) return;
+
+  await clearRecruitmentStatusChannel(interaction.guildId);
+  await refreshRecruitmentPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.reply({ content: "Salon de statut retiré.", ephemeral: true });
+}
+
+/** Clic sur "Définir la catégorie d'acceptation" : menu natif Discord pour choisir la catégorie. */
+async function handlePanelRecruitmentSetAcceptedCategory(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton()) return;
+
+  const select = new ChannelSelectMenuBuilder()
+    .setCustomId("panel:recruitment:set-accepted-category-select")
+    .setPlaceholder("Choisir une catégorie")
+    .addChannelTypes(ChannelType.GuildCategory);
+  const row = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(select);
+  await interaction.reply({ components: [row], ephemeral: true });
+}
+
+async function handleRecruitmentSetAcceptedCategorySelect(interaction: Interaction): Promise<void> {
+  if (!interaction.isChannelSelectMenu() || !interaction.guildId || !interaction.channelId) return;
+
+  const categoryId = interaction.values[0];
+  await setRecruitmentAcceptedCategory(interaction.guildId, categoryId);
+  await refreshRecruitmentPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.update({ content: `Catégorie d'acceptation définie sur <#${categoryId}>.`, components: [] });
+}
+
+/** Clic sur "Retirer la catégorie d'acceptation" : retire directement, un seul mapping possible. */
+async function handlePanelRecruitmentClearAcceptedCategory(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId || !interaction.channelId) return;
+
+  await clearRecruitmentAcceptedCategory(interaction.guildId);
+  await refreshRecruitmentPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.reply({ content: "Catégorie d'acceptation retirée.", ephemeral: true });
+}
+
+/** Clic sur "Définir le rôle d'acceptation" : menu natif Discord (RoleSelectMenu). */
+async function handlePanelRecruitmentSetAcceptedRole(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton()) return;
+
+  const select = new RoleSelectMenuBuilder().setCustomId("panel:recruitment:set-accepted-role-select").setPlaceholder("Choisir un rôle");
+  const row = new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(select);
+  await interaction.reply({ components: [row], ephemeral: true });
+}
+
+async function handleRecruitmentSetAcceptedRoleSelect(interaction: Interaction): Promise<void> {
+  if (!interaction.isRoleSelectMenu() || !interaction.guildId || !interaction.channelId) return;
+
+  const roleId = interaction.values[0];
+  await setRecruitmentAcceptedRole(interaction.guildId, roleId);
+  await refreshRecruitmentPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.update({ content: `Rôle d'acceptation défini sur <@&${roleId}>.`, components: [] });
+}
+
+/** Clic sur "Retirer le rôle d'acceptation" : retire directement, un seul rôle possible. */
+async function handlePanelRecruitmentClearAcceptedRole(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId || !interaction.channelId) return;
+
+  await clearRecruitmentAcceptedRole(interaction.guildId);
+  await refreshRecruitmentPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.reply({ content: "Rôle d'acceptation retiré.", ephemeral: true });
 }
 
 /** Clic sur "Ajouter une question" : d'abord choisir le type de champ (court/long). */
@@ -1679,6 +1780,12 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:recruitment:toggle") return await handlePanelRecruitmentToggle(interaction);
       if (interaction.customId === "panel:recruitment:set-log-channel") return await handlePanelRecruitmentSetLogChannel(interaction);
       if (interaction.customId === "panel:recruitment:clear-log-channel") return await handlePanelRecruitmentClearLogChannel(interaction);
+      if (interaction.customId === "panel:recruitment:set-status-channel") return await handlePanelRecruitmentSetStatusChannel(interaction);
+      if (interaction.customId === "panel:recruitment:clear-status-channel") return await handlePanelRecruitmentClearStatusChannel(interaction);
+      if (interaction.customId === "panel:recruitment:set-accepted-category") return await handlePanelRecruitmentSetAcceptedCategory(interaction);
+      if (interaction.customId === "panel:recruitment:clear-accepted-category") return await handlePanelRecruitmentClearAcceptedCategory(interaction);
+      if (interaction.customId === "panel:recruitment:set-accepted-role") return await handlePanelRecruitmentSetAcceptedRole(interaction);
+      if (interaction.customId === "panel:recruitment:clear-accepted-role") return await handlePanelRecruitmentClearAcceptedRole(interaction);
       if (interaction.customId === "panel:recruitment:add-question") return await handlePanelRecruitmentAddQuestion(interaction);
       if (interaction.customId === "panel:recruitment:remove-question") return await handlePanelRecruitmentRemoveQuestion(interaction);
       if (interaction.customId === "panel:faq:set-category") return await handlePanelFaqSetCategory(interaction);
@@ -1708,6 +1815,8 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:service:set-category-select") return await handleServiceSetCategorySelect(interaction);
       if (interaction.customId === "panel:recruitment:set-category-select") return await handleRecruitmentSetCategorySelect(interaction);
       if (interaction.customId === "panel:recruitment:set-log-channel-select") return await handleRecruitmentSetLogChannelSelect(interaction);
+      if (interaction.customId === "panel:recruitment:set-status-channel-select") return await handleRecruitmentSetStatusChannelSelect(interaction);
+      if (interaction.customId === "panel:recruitment:set-accepted-category-select") return await handleRecruitmentSetAcceptedCategorySelect(interaction);
       if (interaction.customId === "panel:faq:set-category-select") return await handleFaqSetCategorySelect(interaction);
       if (interaction.customId === "panel:absences:set-review-channel-select") return await handlePanelAbsencesSetReviewChannelSelect(interaction);
       if (interaction.customId.startsWith("panel:monitoring:set-channel-select:")) {
@@ -1725,6 +1834,7 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       }
       if (interaction.customId === "panel:absences:set-approver-role-select") return await handlePanelAbsencesSetApproverRoleSelect(interaction);
       if (interaction.customId === "panel:monitoring:set-on-duty-role-select") return await handleMonitoringSetOnDutyRoleSelect(interaction);
+      if (interaction.customId === "panel:recruitment:set-accepted-role-select") return await handleRecruitmentSetAcceptedRoleSelect(interaction);
       return;
     }
 

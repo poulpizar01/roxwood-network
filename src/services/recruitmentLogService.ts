@@ -1,7 +1,8 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Client } from "discord.js";
 import { getApplication } from "./recruitmentService.js";
 import { getTicketById } from "./ticketService.js";
-import { getGuildConfig } from "./guildConfigService.js";
+import { getGuildConfig, setRecruitmentStatusMessageId } from "./guildConfigService.js";
+import { prisma } from "../db/prisma.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -119,5 +120,93 @@ export async function refreshRecruitmentLogMessage(client: Client, ticketId: str
     await message.edit({ embeds: [buildRecruitmentEmbed(ticket, application)], components: [buildRecruitmentActionRow(ticketId)] });
   } catch (error) {
     logger.error(`Echec de mise a jour du message de suivi pour le ticket ${ticketId}`, error);
+  }
+}
+
+/**
+ * Applique les effets de bord declenches quand une candidature passe a ACCEPTED (voir
+ * `panel:recruitment:set-accepted-category`/`-role`) : deplace le salon du ticket vers la
+ * categorie configuree et/ou ajoute le role configure au candidat. Chaque effet est
+ * independant et optionnel (`null` = desactive) ; un echec sur l'un (permissions, hierarchie
+ * de roles, salon/membre introuvable) est journalise sans bloquer l'autre. Appelee a la fois
+ * depuis le changement de statut manuel (bouton "Statut") et l'auto-acceptation par le
+ * monitoring RECRUITMENT ("embauche"), pour ne jamais dupliquer cette logique.
+ */
+export async function applyRecruitmentAcceptance(client: Client, ticketId: string): Promise<void> {
+  const ticket = await getTicketById(ticketId);
+  if (!ticket) return;
+
+  const config = await getGuildConfig(ticket.guildId);
+  if (!config) return;
+
+  if (config.recruitmentAcceptedCategoryId) {
+    try {
+      const channel = await client.channels.fetch(ticket.channelId);
+      if (channel && "setParent" in channel) {
+        await channel.setParent(config.recruitmentAcceptedCategoryId, { lockPermissions: false });
+      }
+    } catch (error) {
+      logger.warn(`Echec du deplacement du salon ${ticket.channelId} vers la categorie d'acceptation`, error);
+    }
+  }
+
+  if (config.recruitmentAcceptedRoleId && ticket.openerId) {
+    try {
+      const guild = await client.guilds.fetch(ticket.guildId);
+      const member = await guild.members.fetch(ticket.openerId);
+      await member.roles.add(config.recruitmentAcceptedRoleId);
+    } catch (error) {
+      logger.warn(`Echec de l'ajout du role d'acceptation a ${ticket.openerId}`, error);
+    }
+  }
+}
+
+/**
+ * Construit/met a jour en place le message permanent affichant l'etat ouvert/ferme des
+ * recrutements dans le salon configure (`recruitmentStatusChannelId`) — distinct du panneau
+ * d'administration, potentiellement visible par tout le monde (ex: annonce publique "on
+ * recrute"). No-op si aucun salon n'est configure. Si le message precedent n'est plus
+ * accessible (supprime manuellement), en reposte un nouveau plutot que d'echouer.
+ */
+export async function refreshRecruitmentStatusMessage(client: Client, guildId: string): Promise<void> {
+  const config = await getGuildConfig(guildId);
+  if (!config?.recruitmentStatusChannelId) return;
+
+  const embed = new EmbedBuilder()
+    .setTitle("Recrutement")
+    .setColor(config.recruitmentOpen ? 0x57f287 : 0xed4245)
+    .setDescription(config.recruitmentOpen ? "**Les recrutements sont ouverts.**" : "**Les recrutements sont actuellement fermés.**");
+
+  try {
+    const channel = await client.channels.fetch(config.recruitmentStatusChannelId);
+    if (!channel?.isTextBased() || channel.isDMBased()) return;
+
+    if (config.recruitmentStatusMessageId) {
+      try {
+        const message = await channel.messages.fetch(config.recruitmentStatusMessageId);
+        await message.edit({ embeds: [embed] });
+        return;
+      } catch {
+        // Message supprime ou inaccessible : on retombe sur le repost ci-dessous.
+      }
+    }
+
+    const message = await channel.send({ embeds: [embed] });
+    await setRecruitmentStatusMessageId(guildId, message.id);
+  } catch (error) {
+    logger.error(`Echec de mise a jour du message de statut recrutement pour la guilde ${guildId}`, error);
+  }
+}
+
+/**
+ * Rafraichit le message de statut recrutement de toutes les guildes qui en ont configure un —
+ * appelee au demarrage du bot (voir `ready.ts`), meme raisonnement que
+ * `refreshAllPanelsAcrossGuilds` : une mise a jour du bot (libelle, couleur...) se propage
+ * ainsi automatiquement sans reconfiguration manuelle.
+ */
+export async function refreshAllRecruitmentStatusMessages(client: Client): Promise<void> {
+  const configs = await prisma.guildConfig.findMany({ where: { recruitmentStatusChannelId: { not: null } } });
+  for (const config of configs) {
+    await refreshRecruitmentStatusMessage(client, config.guildId);
   }
 }
