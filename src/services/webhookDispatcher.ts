@@ -16,7 +16,9 @@ export type WebhookEventType =
   | "monitoring.recruitment"
   | "monitoring.safe"
   | "monitoring.invoice"
-  | "monitoring.sale";
+  | "monitoring.sale"
+  | "absence.created"
+  | "absence.resolved";
 
 /** Types d'evenements "monitoring.*" geres par le panneau (voir `panelService.buildMonitoringPanelRows`). */
 export const MONITORING_WEBHOOK_EVENT_TYPES: WebhookEventType[] = [
@@ -26,6 +28,9 @@ export const MONITORING_WEBHOOK_EVENT_TYPES: WebhookEventType[] = [
   "monitoring.invoice",
   "monitoring.sale",
 ];
+
+/** Types d'evenements "absence.*" geres par le panneau Absences (voir `panelService.buildAbsencesPanelRows`). */
+export const ABSENCE_WEBHOOK_EVENT_TYPES: WebhookEventType[] = ["absence.created", "absence.resolved"];
 
 /**
  * Signe le corps de la requete en HMAC-SHA256 avec le secret propre a chaque abonnement,

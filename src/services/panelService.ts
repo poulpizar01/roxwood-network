@@ -174,11 +174,19 @@ export async function buildAbsencesPanelEmbed(guildId: string): Promise<EmbedBui
   const roles = roleIds.length ? roleIds.map((r) => `<@&${r}>`).join(" ") : "Non configuré";
   const channel = config?.absenceReviewChannelId ? `<#${config.absenceReviewChannelId}>` : "Non configuré";
   const ready = Boolean(roleIds.length && config?.absenceReviewChannelId);
+  const subscriptions = (await listSubscriptions(guildId)).filter((s) => s.eventType.startsWith("absence."));
+  const webhooksText = subscriptions.length
+    ? subscriptions.map((s) => `\`${s.eventType}\` → ${s.url.slice(0, 60)} (${s.enabled ? "actif" : "inactif"})`).join("\n")
+    : "Aucun webhook configuré.";
 
   return new EmbedBuilder()
     .setTitle("Absences")
     .setColor(0x5865f2)
-    .addFields({ name: "Rôles approbateurs", value: roles, inline: true }, { name: "Salon de suivi", value: channel, inline: true })
+    .addFields(
+      { name: "Rôles approbateurs", value: roles, inline: true },
+      { name: "Salon de suivi", value: channel, inline: true },
+      { name: "Webhooks sortants", value: webhooksText }
+    )
     .setDescription(
       ready
         ? "Les membres peuvent déclarer une absence avec la commande /absence."
@@ -189,18 +197,24 @@ export async function buildAbsencesPanelEmbed(guildId: string): Promise<EmbedBui
 /**
  * Boutons de configuration du message dedie "Absences" : roles approbateurs (multi-select
  * Discord natif, remplace la selection entiere a chaque usage — voir
- * `panel:absences:set-approver-roles`) et salon de suivi (bouton unique Definir/Retirer selon
- * l'etat courant, meme convention que les categories de ticket).
+ * `panel:absences:set-approver-roles`), salon de suivi (bouton unique Definir/Retirer selon
+ * l'etat courant, meme convention que les categories de ticket), et abonnements webhook
+ * sortants ("absence.created"/"absence.resolved" — meme mecanisme que Monitoring, scope
+ * different : voir `ABSENCE_WEBHOOK_EVENT_TYPES`).
  */
 export function buildAbsencesPanelRows(reviewChannelId: string | null): ActionRowBuilder<ButtonBuilder>[] {
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+  const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("panel:absences:set-approver-roles").setLabel("Définir les rôles approbateurs").setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId(reviewChannelId ? "panel:absences:clear-review-channel" : "panel:absences:set-review-channel")
       .setLabel(reviewChannelId ? "Retirer le salon de suivi" : "Définir le salon de suivi")
       .setStyle(reviewChannelId ? ButtonStyle.Danger : ButtonStyle.Success)
   );
-  return [row];
+  const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("panel:absences:add-webhook").setLabel("Ajouter un webhook").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("panel:absences:remove-webhook").setLabel("Retirer un webhook").setStyle(ButtonStyle.Danger)
+  );
+  return [row1, row2];
 }
 
 /**
@@ -434,7 +448,7 @@ export const MONITORING_TYPE_LABELS: Record<MonitoringLogType, string> = {
  */
 export async function buildMonitoringPanelEmbed(guildId: string): Promise<EmbedBuilder> {
   const config = await getGuildConfig(guildId);
-  const subscriptions = await listSubscriptions(guildId);
+  const subscriptions = (await listSubscriptions(guildId)).filter((s) => s.eventType.startsWith("monitoring."));
 
   const channelsText = (Object.keys(MONITORING_TYPE_LABELS) as MonitoringLogType[])
     .map((type) => {

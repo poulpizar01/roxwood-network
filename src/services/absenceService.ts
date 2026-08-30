@@ -1,5 +1,6 @@
 import type { AbsenceStatus } from "@prisma/client";
 import { prisma } from "../db/prisma.js";
+import { dispatchWebhook } from "./webhookDispatcher.js";
 
 /**
  * Service dedie aux demandes d'absence : declarees par un membre via le panneau
@@ -47,7 +48,18 @@ export async function createAbsenceRequest(
   endDate: Date,
   reason: string
 ) {
-  return prisma.absenceRequest.create({ data: { guildId, requesterId, startDate, endDate, reason } });
+  const request = await prisma.absenceRequest.create({ data: { guildId, requesterId, startDate, endDate, reason } });
+
+  await dispatchWebhook(guildId, "absence.created", {
+    requestId: request.id,
+    requesterId: request.requesterId,
+    startDate: request.startDate.toISOString(),
+    endDate: request.endDate.toISOString(),
+    reason: request.reason,
+    status: request.status,
+  });
+
+  return request;
 }
 
 /** Memorise ou vit le message de suivi, pour pouvoir l'editer en place a la resolution. */
@@ -57,7 +69,17 @@ export async function saveAbsenceMessageRef(id: string, messageId: string) {
 
 /** Accepte ou refuse une demande d'absence encore en attente. */
 export async function resolveAbsenceRequest(id: string, resolverId: string, status: AbsenceStatus) {
-  return prisma.absenceRequest.update({ where: { id }, data: { status, resolverId, resolvedAt: new Date() } });
+  const request = await prisma.absenceRequest.update({ where: { id }, data: { status, resolverId, resolvedAt: new Date() } });
+
+  await dispatchWebhook(request.guildId, "absence.resolved", {
+    requestId: request.id,
+    requesterId: request.requesterId,
+    status: request.status,
+    resolverId: request.resolverId,
+    resolvedAt: request.resolvedAt?.toISOString() ?? null,
+  });
+
+  return request;
 }
 
 /** Recupere une demande d'absence par son id, ou `null` si elle n'existe pas. */
