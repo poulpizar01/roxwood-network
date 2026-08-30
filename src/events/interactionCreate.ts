@@ -1228,9 +1228,11 @@ async function handleServiceSetImageSelect(interaction: Interaction): Promise<vo
   }
 
   await setItemImage(interaction.guildId, itemId, attachment.url);
-  await photoMessage.delete().catch((error: unknown) => logger.warn("Echec suppression du message photo dans le panneau", error));
+  // Le message porteur de la photo n'est PAS supprime : l'URL CDN Discord d'une piece jointe
+  // cesse de repondre (404) des que son message est supprime, meme avant l'expiration du lien
+  // signe — le supprimer casserait la photo partout ou elle est affichee (catalogue, commandes).
   await refreshServicePanelMessage(interaction.client, interaction.guildId, interaction.channelId);
-  await interaction.editReply({ content: "Photo mise à jour." });
+  await interaction.editReply({ content: "Photo mise à jour (le message envoyé reste dans ce salon, ne le supprime pas)." });
 }
 
 /** Clic sur "Définir le poids d'un article" : menu natif des articles actifs. */
@@ -1375,9 +1377,10 @@ async function handlePanelServiceSetBanner(interaction: Interaction): Promise<vo
   }
 
   await setShopBanner(interaction.guildId, attachment.url);
-  await photoMessage.delete().catch((error: unknown) => logger.warn("Echec suppression du message banniere dans le panneau", error));
+  // Meme raisonnement que la photo d'article : ne pas supprimer ce message, sous peine de
+  // casser l'URL CDN (404 immediat des que le message porteur disparait).
   await refreshServicePanelMessage(interaction.client, interaction.guildId, interaction.channelId);
-  await interaction.editReply({ content: "Bannière mise à jour." });
+  await interaction.editReply({ content: "Bannière mise à jour (le message envoyé reste dans ce salon, ne le supprime pas)." });
 }
 
 /** Clic sur "Retirer la bannière". */
