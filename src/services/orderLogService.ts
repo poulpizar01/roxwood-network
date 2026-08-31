@@ -10,6 +10,7 @@ import {
 } from "./orderService.js";
 import { getTicketById } from "./ticketService.js";
 import { getGuildConfig } from "./guildConfigService.js";
+import { dispatchWebhook } from "./webhookDispatcher.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -154,6 +155,43 @@ export async function upsertOrderMessage(client: Client, ticketId: string): Prom
  */
 export const refreshOrderMessage = upsertOrderMessage;
 
+/**
+ * Envoie l'etat complet et courant d'une commande sur l'unique evenement `order.updated` —
+ * meme raisonnement que `absenceService.dispatchAbsenceUpdated` : un recepteur qui veut
+ * generer sa propre facture n'a qu'un type d'evenement a ecouter pour toujours avoir la
+ * derniere version (articles, montants, statut de paiement), plutot que de recomposer l'etat
+ * a partir de plusieurs evenements. Appelee a la validation de la commande par le client et a
+ * chaque (re)generation de facture (voir `sendInvoiceForOrder`).
+ */
+export async function dispatchOrderUpdated(
+  guildId: string,
+  ticket: { id: string; channelId: string; openerId: string | null },
+  order: OrderWithItems
+): Promise<void> {
+  await dispatchWebhook(guildId, "order.updated", {
+    orderId: order.id,
+    ticketId: ticket.id,
+    channelId: ticket.channelId,
+    customerId: ticket.openerId,
+    confirmed: order.confirmed,
+    status: order.status,
+    paymentStatus: order.paymentStatus,
+    invoiceNumber: order.invoiceNumber,
+    items: order.items.map((i) => ({
+      name: i.name,
+      unitPrice: i.unitPrice,
+      quantity: i.quantity,
+      weightGrams: i.weightGrams,
+      answers: i.answers.map((a) => ({ question: a.question, answer: a.answer })),
+    })),
+    subtotal: computeTotal(order),
+    deliveryFee: order.deliveryFee,
+    discountPercent: order.discountPercent,
+    discountAmount: computeDiscountAmount(order),
+    total: computeGrandTotal(order),
+  });
+}
+
 /** Formate un poids en grammes pour affichage (ex: `120.0kg`), meme convention decimale que la reference fournie par l'utilisateur. */
 function formatWeight(grams: number): string {
   return `${(grams / 1000).toFixed(1)}kg`;
@@ -226,7 +264,7 @@ async function buildInvoiceEmbed(
 export async function sendInvoiceForOrder(
   client: Client,
   guildId: string,
-  ticket: { channelId: string; openerId: string | null },
+  ticket: { id: string; channelId: string; openerId: string | null },
   order: OrderWithItems
 ): Promise<void> {
   const invoiceNumber = order.invoiceNumber ?? (await setInvoiceNumber(order.id));
@@ -254,4 +292,9 @@ export async function sendInvoiceForOrder(
   if (channel?.isTextBased() && !channel.isDMBased()) {
     await channel.send({ embeds: [embed] });
   }
+
+  // `order.invoiceNumber` peut encore etre `null` en memoire si c'est cet appel qui vient de
+  // le generer (setInvoiceNumber ecrit en base mais ne mute pas l'objet local) : on passe le
+  // numero resolu explicitement plutot que de relire un champ potentiellement perime.
+  await dispatchOrderUpdated(guildId, ticket, { ...order, invoiceNumber });
 }

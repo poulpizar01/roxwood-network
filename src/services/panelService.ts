@@ -198,9 +198,8 @@ export async function buildAbsencesPanelEmbed(guildId: string): Promise<EmbedBui
  * Boutons de configuration du message dedie "Absences" : roles approbateurs (multi-select
  * Discord natif, remplace la selection entiere a chaque usage — voir
  * `panel:absences:set-approver-roles`), salon de suivi (bouton unique Definir/Retirer selon
- * l'etat courant, meme convention que les categories de ticket), et abonnements webhook
- * sortants ("absence.created"/"absence.resolved" — meme mecanisme que Monitoring, scope
- * different : voir `ABSENCE_WEBHOOK_EVENT_TYPES`).
+ * l'etat courant, meme convention que les categories de ticket), et abonnements au webhook
+ * sortant "absence.updated" (meme mecanisme HMAC que Monitoring, scope distinct).
  */
 export function buildAbsencesPanelRows(reviewChannelId: string | null): ActionRowBuilder<ButtonBuilder>[] {
   const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -257,23 +256,37 @@ export async function buildServicePanelEmbed(guildId: string): Promise<EmbedBuil
     ].join("\n"),
   });
 
+  const subscriptions = (await listSubscriptions(guildId)).filter((s) => s.eventType.startsWith("order."));
+  embed.addFields({
+    name: "Webhooks sortants",
+    value: subscriptions.length
+      ? subscriptions.map((s) => `\`${s.eventType}\` → ${s.url.slice(0, 60)} (${s.enabled ? "actif" : "inactif"})`).join("\n")
+      : "Aucun webhook configuré.",
+  });
+
   return embed;
 }
 
 /**
  * Boutons du message dedie "Service client" : categorie (bouton unique, libelle Definir/Retirer
- * selon l'etat courant — meme principe que le bouton ouvrir/fermer les recrutements), gestion
- * des articles (ajout/retrait/photo/poids) et de leurs champs, et le profil boutique affiche
- * en pied de facture (RIB/telephone/message/capacite camion regroupes dans un seul modal,
- * banniere via le meme mecanisme d'upload que la photo d'un article). Remplace entierement
- * `/catalog add`/`remove`/`field-add`/`field-remove`.
+ * selon l'etat courant — meme principe que le bouton ouvrir/fermer les recrutements) et profil
+ * boutique (RIB/telephone/message/capacite camion regroupes dans un seul modal, banniere via
+ * le meme mecanisme d'upload que la photo d'un article) sur la meme ligne ; gestion des
+ * articles (ajout/retrait/photo/poids) et de leurs champs ; abonnements au webhook sortant
+ * "order.updated" (meme mecanisme HMAC que Monitoring/Absences, pas de choix de type — un
+ * seul evenement existe). Remplace entierement `/catalog add`/`remove`/`field-add`/`field-remove`.
  */
 export function buildServicePanelRows(categoryId: string | null, bannerConfigured: boolean): ActionRowBuilder<ButtonBuilder>[] {
   const categoryRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(categoryId ? "panel:service:clear-category" : "panel:service:set-category")
       .setLabel(categoryId ? "Retirer la catégorie" : "Définir la catégorie")
-      .setStyle(categoryId ? ButtonStyle.Danger : ButtonStyle.Success)
+      .setStyle(categoryId ? ButtonStyle.Danger : ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("panel:service:set-shop-profile").setLabel("Configurer la boutique").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(bannerConfigured ? "panel:service:clear-banner" : "panel:service:set-banner")
+      .setLabel(bannerConfigured ? "Retirer la bannière" : "Définir la bannière")
+      .setStyle(bannerConfigured ? ButtonStyle.Danger : ButtonStyle.Success)
   );
   const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("panel:service:add-item").setLabel("Ajouter un article").setStyle(ButtonStyle.Primary),
@@ -288,11 +301,8 @@ export function buildServicePanelRows(categoryId: string | null, bannerConfigure
     new ButtonBuilder().setCustomId("panel:service:remove-field").setLabel("Retirer un champ").setStyle(ButtonStyle.Danger)
   );
   const row4 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("panel:service:set-shop-profile").setLabel("Configurer la boutique").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId(bannerConfigured ? "panel:service:clear-banner" : "panel:service:set-banner")
-      .setLabel(bannerConfigured ? "Retirer la bannière" : "Définir la bannière")
-      .setStyle(bannerConfigured ? ButtonStyle.Danger : ButtonStyle.Success)
+    new ButtonBuilder().setCustomId("panel:service:add-webhook").setLabel("Ajouter un webhook").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("panel:service:remove-webhook").setLabel("Retirer un webhook").setStyle(ButtonStyle.Danger)
   );
   return [categoryRow, row1, row2, row3, row4];
 }

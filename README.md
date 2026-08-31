@@ -90,6 +90,8 @@ Le staff configure le catalogue via le panneau "Service client", le **client com
 
 La facture est un **embed Discord** (pas une image générée) : articles, sous-total, livraison, réduction et total, plus deux blocs optionnels qui n'apparaissent que si l'information existe — **poids total et nombre de camions requis** (uniquement si au moins un article de la commande a un poids configuré et qu'une capacité de camion est définie côté boutique, sinon ces deux champs sont simplement omis plutôt que d'afficher une valeur trompeuse) et le **profil boutique** (RIB, téléphone, message de remerciement, bannière — panneau "Service client" → "Configurer la boutique"/"Définir la bannière", configuré une fois pour toute la guilde plutôt que ressaisi à chaque facture).
 
+Le panneau expose aussi un webhook sortant `order.updated`, envoyé à la validation de la commande par le client puis à chaque (re)génération de facture, avec l'état complet de la commande (articles, sous-total, livraison, réduction, total, statut de paiement, numéro de facture) — de quoi laisser un site externe générer sa propre facture sans dépendre du rendu Discord. Même principe qu'`absence.updated` : un seul type d'événement, pas de sélection à l'ajout.
+
 ## Absences
 
 Panneau "Absences" → configurer les **rôles approbateurs** (sélection multiple, plusieurs paliers de management possibles — n'importe lequel de ces rôles peut traiter une demande) et le **salon de suivi** (séparé du salon panneau). Une fois les deux définis, n'importe quel membre peut déclarer une absence avec `/absence` (dates JJ/MM/AAAA + motif). La demande est postée dans le salon de suivi avec deux boutons **Accepter**/**Refuser**, réservés aux rôles approbateurs ; le message se met à jour en place (statut, qui a traité) une fois résolue.
@@ -138,7 +140,7 @@ Les actions sensibles du panneau "Monitoring" (jobId, rôle "en service", salons
 ## Points d'extension
 
 - `src/services/autoReplyService.ts` : interface `AutoReplyMatcher`, un seul matcher mot-clé fourni. Ajouter un matcher IA (ex: Claude API) ici sans toucher au reste.
-- `src/services/webhookDispatcher.ts` : webhooks sortants signés HMAC (header `X-Signature-256`) sur les événements `monitoring.shift`, `monitoring.recruitment`, `monitoring.safe`, `monitoring.invoice`, `monitoring.sale`, `absence.updated` — point de branchement générique pour un CRM/site externe, tous gérés sans accès DB directement depuis le panneau correspondant (Monitoring pour `monitoring.*`, Absences pour `absence.updated`). Un événement `ticket.created`/`ticket.closed` a existé un temps mais a été retiré : aucune UI panneau ne l'exposait et aucun besoin concret ne le motivait — à réintroduire si un vrai cas d'usage se présente, même schéma que les deux panneaux existants.
+- `src/services/webhookDispatcher.ts` : webhooks sortants signés HMAC (header `X-Signature-256`) sur les événements `monitoring.shift`, `monitoring.recruitment`, `monitoring.safe`, `monitoring.invoice`, `monitoring.sale`, `absence.updated`, `order.updated` — point de branchement générique pour un CRM/site externe, tous gérés sans accès DB directement depuis le panneau correspondant (Monitoring pour `monitoring.*`, Absences pour `absence.updated`, Service client pour `order.updated`). Un événement `ticket.created`/`ticket.closed` a existé un temps mais a été retiré : aucune UI panneau ne l'exposait et aucun besoin concret ne le motivait — à réintroduire si un vrai cas d'usage se présente, même schéma que les panneaux existants.
 
 ## À vérifier sur le vrai serveur
 
