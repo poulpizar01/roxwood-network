@@ -108,6 +108,7 @@ import { MONITORING_WEBHOOK_EVENT_TYPES, type WebhookEventType } from "../servic
 import { createSubscription, listSubscriptions, removeSubscription } from "../services/webhookSubscriptionService.js";
 import type { MonitoringLogType } from "@prisma/client";
 import { logger } from "../utils/logger.js";
+import { buildImageAttachment } from "../utils/imageAttachment.js";
 
 /**
  * Point d'entree unique pour toutes les interactions Discord (commandes slash, boutons,
@@ -394,11 +395,18 @@ async function handleOrderSelectItem(interaction: Interaction): Promise<void> {
     .setColor(0x5865f2)
     .addFields({ name: "Prix", value: `${item.price.toLocaleString("fr-FR")} $`, inline: true });
   if (item.description) embed.setDescription(item.description);
-  if (item.imageUrl) embed.setImage(item.imageUrl);
+
+  const files = [];
+  if (item.imageData && item.imageFilename) {
+    const { attachment, url } = buildImageAttachment(Buffer.from(item.imageData), item.imageFilename);
+    embed.setImage(url);
+    files.push(attachment);
+  }
 
   const confirmButton = new ButtonBuilder().setCustomId(`order:confirm-item:${item.id}`).setLabel("Continuer").setStyle(ButtonStyle.Success);
   await interaction.reply({
     embeds: [embed],
+    files,
     components: [new ActionRowBuilder<ButtonBuilder>().addComponents(confirmButton)],
     ephemeral: true,
   });
@@ -1249,12 +1257,21 @@ async function handleServiceSetImageSelect(interaction: Interaction): Promise<vo
     return;
   }
 
-  await setItemImage(interaction.guildId, itemId, attachment.url);
-  // Le message porteur de la photo n'est PAS supprime : l'URL CDN Discord d'une piece jointe
-  // cesse de repondre (404) des que son message est supprime, meme avant l'expiration du lien
-  // signe — le supprimer casserait la photo partout ou elle est affichee (catalogue, commandes).
-  await refreshServicePanelMessage(interaction.client, interaction.guildId, interaction.channelId);
-  await interaction.editReply({ content: "Photo mise à jour (le message envoyé reste dans ce salon, ne le supprime pas)." });
+  try {
+    // On telecharge les octets pour les posseder (stockes en base, voir `setItemImage`) plutot
+    // que de garder l'URL CDN Discord de l'attachment : celle-ci cesse de repondre (404) des
+    // que son message est supprime, meme avant l'expiration du lien signe. Les possedant, on
+    // peut supprimer ce message tout de suite sans rien casser.
+    const response = await fetch(attachment.url);
+    const data = Buffer.from(await response.arrayBuffer());
+    await setItemImage(interaction.guildId, itemId, data, attachment.name ?? "photo.png");
+    await photoMessage.delete().catch((error: unknown) => logger.warn("Echec suppression du message photo dans le panneau", error));
+    await refreshServicePanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+    await interaction.editReply({ content: "Photo mise à jour." });
+  } catch (error) {
+    logger.error("Echec du telechargement de la photo d'article", error);
+    await interaction.editReply({ content: "Échec du téléchargement de l'image, réessaie avec le bouton." });
+  }
 }
 
 /** Clic sur "Définir le poids d'un article" : menu natif des articles actifs. */
@@ -1398,11 +1415,19 @@ async function handlePanelServiceSetBanner(interaction: Interaction): Promise<vo
     return;
   }
 
-  await setShopBanner(interaction.guildId, attachment.url);
-  // Meme raisonnement que la photo d'article : ne pas supprimer ce message, sous peine de
-  // casser l'URL CDN (404 immediat des que le message porteur disparait).
-  await refreshServicePanelMessage(interaction.client, interaction.guildId, interaction.channelId);
-  await interaction.editReply({ content: "Bannière mise à jour (le message envoyé reste dans ce salon, ne le supprime pas)." });
+  try {
+    // Meme raisonnement que la photo d'article : on possede les octets plutot que l'URL CDN,
+    // pour pouvoir supprimer ce message sans casser la banniere sur les factures.
+    const response = await fetch(attachment.url);
+    const data = Buffer.from(await response.arrayBuffer());
+    await setShopBanner(interaction.guildId, data, attachment.name ?? "banniere.png");
+    await photoMessage.delete().catch((error: unknown) => logger.warn("Echec suppression du message banniere dans le panneau", error));
+    await refreshServicePanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+    await interaction.editReply({ content: "Bannière mise à jour." });
+  } catch (error) {
+    logger.error("Echec du telechargement de la banniere", error);
+    await interaction.editReply({ content: "Échec du téléchargement de l'image, réessaie avec le bouton." });
+  }
 }
 
 /** Clic sur "Retirer la bannière". */

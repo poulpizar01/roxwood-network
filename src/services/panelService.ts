@@ -239,7 +239,7 @@ export async function buildServicePanelEmbed(guildId: string): Promise<EmbedBuil
         .map((item) => {
           const fields = item.fields.length ? item.fields.map((f) => f.label).join(", ") : "aucun";
           const weight = item.weightGrams !== null ? `${(item.weightGrams / 1000).toFixed(1)}kg` : "non renseigné";
-          return `**${item.name}** — ${item.price.toLocaleString("fr-FR")} $ (photo : ${item.imageUrl ? "oui" : "non"}, poids : ${weight})\nChamps : ${fields}`;
+          return `**${item.name}** — ${item.price.toLocaleString("fr-FR")} $ (photo : ${item.imageData ? "oui" : "non"}, poids : ${weight})\nChamps : ${fields}`;
         })
         .join("\n\n"),
     });
@@ -252,7 +252,7 @@ export async function buildServicePanelEmbed(guildId: string): Promise<EmbedBuil
       `Téléphone : ${config?.shopPhone ?? "non configuré"}`,
       `Message de remerciement : ${config?.shopThankYouMessage ?? "non configuré"}`,
       `Capacité d'un camion : ${config?.truckCapacityGrams ? `${(config.truckCapacityGrams / 1000).toFixed(1)}kg` : "non configurée"}`,
-      `Bannière : ${config?.shopBannerUrl ? "configurée" : "non configurée"}`,
+      `Bannière : ${config?.shopBannerData ? "configurée" : "non configurée"}`,
     ].join("\n"),
   });
 
@@ -541,7 +541,7 @@ export async function refreshServicePanelMessage(client: Client, guildId: string
   const categoryId = config?.ticketCategories.find((c) => c.type === "SERVICE")?.categoryId ?? null;
   await upsertPanelMessage(client, guildId, "SERVICE", channelId, {
     embeds: [await buildServicePanelEmbed(guildId)],
-    components: buildServicePanelRows(categoryId, Boolean(config?.shopBannerUrl)),
+    components: buildServicePanelRows(categoryId, Boolean(config?.shopBannerData)),
   });
 }
 

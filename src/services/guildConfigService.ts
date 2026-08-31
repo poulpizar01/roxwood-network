@@ -323,17 +323,17 @@ export async function setShopProfile(
   return refresh(guildId);
 }
 
-/** Definit la banniere affichee en bas de chaque facture. */
-export async function setShopBanner(guildId: string, url: string): Promise<GuildConfigWithCategories> {
+/** Definit la banniere affichee en bas de chaque facture, en octets bruts (voir `shopBannerData` dans le schema). */
+export async function setShopBanner(guildId: string, data: Buffer, filename: string): Promise<GuildConfigWithCategories> {
   await ensureGuildConfig(guildId);
-  await prisma.guildConfig.update({ where: { guildId }, data: { shopBannerUrl: url } });
+  await prisma.guildConfig.update({ where: { guildId }, data: { shopBannerData: data, shopBannerFilename: filename } });
   return refresh(guildId);
 }
 
 /** Retire la banniere des factures. */
 export async function clearShopBanner(guildId: string): Promise<GuildConfigWithCategories> {
   await ensureGuildConfig(guildId);
-  await prisma.guildConfig.update({ where: { guildId }, data: { shopBannerUrl: null } });
+  await prisma.guildConfig.update({ where: { guildId }, data: { shopBannerData: null, shopBannerFilename: null } });
   return refresh(guildId);
 }
 

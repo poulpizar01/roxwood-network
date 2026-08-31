@@ -56,9 +56,12 @@ model GuildConfig {
   shopRib String?
   /// Numero de telephone de la boutique, affiche en pied de facture.
   shopPhone String?
-  /// URL de la banniere affichee en bas de chaque facture (image fixe, configuree une fois
-  /// dans le panneau plutot que ressaisie a chaque facture).
-  shopBannerUrl String?
+  /// Octets bruts de la banniere affichee en bas de chaque facture — meme raisonnement que
+  /// `CatalogItem.imageData` : stockee en base plutot qu'une URL Discord, pour pouvoir
+  /// supprimer le message d'upload sans casser l'image.
+  shopBannerData     Bytes?
+  /// Nom de fichier associe a `shopBannerData`, requis par l'API Discord pour le re-upload.
+  shopBannerFilename String?
   /// Message de remerciement affiche en pied de facture (ex: "X vous remercie pour votre confiance").
   shopThankYouMessage String?
   /// Capacite d'un camion en grammes, utilisee pour calculer le nombre de camions requis a
@@ -273,8 +276,15 @@ model CatalogItem {
   description String?
   /// Prix unitaire, en devise in-game (entier, pas de sous-unite/centimes).
   price       Int
-  /// URL de la photo de l'article (attachment Discord au moment de `/catalog add`).
-  imageUrl    String?
+  /// Octets bruts de la photo de l'article, stockes en base plutot que juste son URL Discord :
+  /// l'URL CDN d'un attachment cesse de repondre (404) des que le message qui le porte est
+  /// supprime, meme avant l'expiration normale du lien signe (constate en conditions reelles
+  /// cette session). En les possedant, le bot peut re-uploader l'image (`attachment://<filename>`)
+  /// a chaque fois qu'un embed en a besoin, et le message d'upload original peut etre supprime
+  /// sans rien casser.
+  imageData     Bytes?
+  /// Nom de fichier associe a `imageData`, requis par l'API Discord pour le re-upload.
+  imageFilename String?
   /// Poids unitaire en grammes, optionnel. Si aucun article d'une commande n'a de poids
   /// configure, "poids total"/"camions requis" sont omis de la facture (voir `orderLogService.ts`).
   weightGrams Int?

@@ -14,17 +14,13 @@ import { prisma } from "../db/prisma.js";
  */
 const MAX_FIELDS_PER_ITEM = 5;
 
-/** Cree un nouvel article de catalogue (actif par defaut). L'image est obligatoire cote commande slash. */
-export async function addItem(
-  guildId: string,
-  data: { name: string; price: number; imageUrl?: string; description?: string }
-) {
+/** Cree un nouvel article de catalogue (actif par defaut). La photo se definit ensuite separement (voir `setItemImage`). */
+export async function addItem(guildId: string, data: { name: string; price: number; description?: string }) {
   return prisma.catalogItem.create({
     data: {
       guildId,
       name: data.name,
       price: data.price,
-      imageUrl: data.imageUrl,
       description: data.description,
     },
   });
@@ -73,12 +69,14 @@ export async function listActiveWithFields(guildId: string) {
 }
 
 /**
- * Definit (ou remplace) la photo d'un article. Separee de `addItem` : les modals Discord ne
- * supportant pas l'upload de fichier, la photo est envoyee dans un second temps en message
- * classique dans le salon du panneau (voir `handleServiceSetImageSelect`).
+ * Definit (ou remplace) la photo d'un article, stockee en octets bruts plutot qu'une URL
+ * Discord (voir le commentaire sur `imageData` dans le schema). Separee de `addItem` : les
+ * modals Discord ne supportant pas l'upload de fichier, la photo est envoyee dans un second
+ * temps en message classique dans le salon du panneau (voir `handleServiceSetImageSelect`),
+ * dont les octets sont telecharges puis le message peut etre supprime sans rien casser.
  */
-export async function setItemImage(guildId: string, id: string, imageUrl: string) {
-  await prisma.catalogItem.updateMany({ where: { id, guildId }, data: { imageUrl } });
+export async function setItemImage(guildId: string, id: string, imageData: Buffer, imageFilename: string) {
+  await prisma.catalogItem.updateMany({ where: { id, guildId }, data: { imageData, imageFilename } });
 }
 
 /**

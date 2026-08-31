@@ -1,4 +1,4 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Client } from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type AttachmentBuilder, type Client } from "discord.js";
 import {
   computeDiscountAmount,
   computeGrandTotal,
@@ -12,6 +12,7 @@ import { getTicketById } from "./ticketService.js";
 import { getGuildConfig } from "./guildConfigService.js";
 import { dispatchWebhook } from "./webhookDispatcher.js";
 import { logger } from "../utils/logger.js";
+import { buildImageAttachment } from "../utils/imageAttachment.js";
 
 /**
  * Construction et mise a jour de l'unique message de commande dans le salon du ticket :
@@ -210,7 +211,7 @@ async function buildInvoiceEmbed(
   customerLabel: string,
   order: OrderWithItems,
   invoiceNumber: string
-): Promise<EmbedBuilder> {
+): Promise<{ embed: EmbedBuilder; files: AttachmentBuilder[] }> {
   const config = await getGuildConfig(guildId);
   const subtotal = computeTotal(order);
   const grandTotal = computeGrandTotal(order);
@@ -250,9 +251,15 @@ async function buildInvoiceEmbed(
     (line): line is string => Boolean(line)
   );
   if (footerLines.length > 0) embed.setFooter({ text: footerLines.join("\n") });
-  if (config?.shopBannerUrl) embed.setImage(config.shopBannerUrl);
 
-  return embed;
+  const files: AttachmentBuilder[] = [];
+  if (config?.shopBannerData && config.shopBannerFilename) {
+    const { attachment, url } = buildImageAttachment(Buffer.from(config.shopBannerData), config.shopBannerFilename);
+    embed.setImage(url);
+    files.push(attachment);
+  }
+
+  return { embed, files };
 }
 
 /**
@@ -286,11 +293,11 @@ export async function sendInvoiceForOrder(
     logger.warn(`Impossible de recuperer la guilde ${guildId} pour la facture`, error);
   }
 
-  const embed = await buildInvoiceEmbed(guildId, guildName, customerLabel, order, invoiceNumber);
+  const { embed, files } = await buildInvoiceEmbed(guildId, guildName, customerLabel, order, invoiceNumber);
 
   const channel = await client.channels.fetch(ticket.channelId);
   if (channel?.isTextBased() && !channel.isDMBased()) {
-    await channel.send({ embeds: [embed] });
+    await channel.send({ embeds: [embed], files });
   }
 
   // `order.invoiceNumber` peut encore etre `null` en memoire si c'est cet appel qui vient de
