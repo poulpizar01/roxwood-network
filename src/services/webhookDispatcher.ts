@@ -10,8 +10,6 @@ import { logger } from "../utils/logger.js";
 
 /** Types d'evenements pouvant declencher l'envoi d'un webhook. */
 export type WebhookEventType =
-  | "ticket.created"
-  | "ticket.closed"
   | "monitoring.shift"
   | "monitoring.recruitment"
   | "monitoring.safe"

@@ -138,7 +138,7 @@ Les actions sensibles du panneau "Monitoring" (jobId, rôle "en service", salons
 ## Points d'extension
 
 - `src/services/autoReplyService.ts` : interface `AutoReplyMatcher`, un seul matcher mot-clé fourni. Ajouter un matcher IA (ex: Claude API) ici sans toucher au reste.
-- `src/services/webhookDispatcher.ts` : webhooks sortants signés HMAC (header `X-Signature-256`) sur les événements `ticket.created`, `ticket.closed`, `monitoring.shift`, `monitoring.recruitment`, `monitoring.safe`, `monitoring.invoice`, `monitoring.sale`, `absence.updated` — point de branchement générique pour un CRM/site externe, tous gérés sans accès DB directement depuis le panneau correspondant (Monitoring pour `monitoring.*`, Absences pour `absence.updated`). `ticket.created`/`ticket.closed` sont dispatchés par le code mais n'ont pour l'instant aucune UI panneau pour s'y abonner (créable uniquement via la table `WebhookSubscription` en base) — a construire si un usage se présente, même schéma que les deux autres panneaux.
+- `src/services/webhookDispatcher.ts` : webhooks sortants signés HMAC (header `X-Signature-256`) sur les événements `monitoring.shift`, `monitoring.recruitment`, `monitoring.safe`, `monitoring.invoice`, `monitoring.sale`, `absence.updated` — point de branchement générique pour un CRM/site externe, tous gérés sans accès DB directement depuis le panneau correspondant (Monitoring pour `monitoring.*`, Absences pour `absence.updated`). Un événement `ticket.created`/`ticket.closed` a existé un temps mais a été retiré : aucune UI panneau ne l'exposait et aucun besoin concret ne le motivait — à réintroduire si un vrai cas d'usage se présente, même schéma que les deux panneaux existants.
 
 ## À vérifier sur le vrai serveur
 

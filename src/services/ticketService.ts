@@ -2,7 +2,6 @@ import type { NonThreadGuildBasedChannel, PermissionOverwrites } from "discord.j
 import type { Ticket, TicketType } from "@prisma/client";
 import { prisma } from "../db/prisma.js";
 import { logger } from "../utils/logger.js";
-import { dispatchWebhook } from "./webhookDispatcher.js";
 
 /**
  * Service central du cycle de vie d'un ticket : creation/detection, fermeture, suivi d'activite.
@@ -54,21 +53,13 @@ export async function trackTicketChannel(
 
   logger.info(`Nouveau ticket suivi (${type}) : ${channel.id} (guild ${channel.guildId})`);
 
-  await dispatchWebhook(channel.guildId, "ticket.created", {
-    ticketId: ticket.id,
-    channelId: ticket.channelId,
-    openerId: ticket.openerId,
-    type: ticket.type,
-  });
-
   return ticket;
 }
 
 /**
- * Marque un ticket comme ferme (statut CLOSED + horodatage) et notifie les webhooks abonnes.
- * No-op silencieux si le canal n'est pas un ticket suivi, ou s'il est deja marque ferme
- * (evite les doubles notifications si plusieurs signaux de fermeture se declenchent, ex:
- * renommage puis suppression du canal).
+ * Marque un ticket comme ferme (statut CLOSED + horodatage). No-op silencieux si le canal
+ * n'est pas un ticket suivi, ou s'il est deja marque ferme (evite les doubles traitements si
+ * plusieurs signaux de fermeture se declenchent, ex: renommage puis suppression du canal).
  */
 export async function markTicketClosed(channelId: string, guildId: string): Promise<void> {
   const ticket = await prisma.ticket.findUnique({ where: { channelId } });
@@ -80,8 +71,6 @@ export async function markTicketClosed(channelId: string, guildId: string): Prom
   });
 
   logger.info(`Ticket ferme : ${channelId} (guild ${guildId})`);
-
-  await dispatchWebhook(guildId, "ticket.closed", { ticketId: ticket.id, channelId });
 }
 
 /**
