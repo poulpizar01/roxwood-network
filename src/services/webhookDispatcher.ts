@@ -17,8 +17,7 @@ export type WebhookEventType =
   | "monitoring.safe"
   | "monitoring.invoice"
   | "monitoring.sale"
-  | "absence.created"
-  | "absence.resolved";
+  | "absence.updated";
 
 /** Types d'evenements "monitoring.*" geres par le panneau (voir `panelService.buildMonitoringPanelRows`). */
 export const MONITORING_WEBHOOK_EVENT_TYPES: WebhookEventType[] = [
@@ -29,8 +28,14 @@ export const MONITORING_WEBHOOK_EVENT_TYPES: WebhookEventType[] = [
   "monitoring.sale",
 ];
 
-/** Types d'evenements "absence.*" geres par le panneau Absences (voir `panelService.buildAbsencesPanelRows`). */
-export const ABSENCE_WEBHOOK_EVENT_TYPES: WebhookEventType[] = ["absence.created", "absence.resolved"];
+/**
+ * Type d'evenement "absence.*" gere par le panneau Absences (voir `panelService.buildAbsencesPanelRows`).
+ * Un seul type plutot que created/resolved separes : chaque envoi porte l'etat complet de la
+ * demande (voir `absenceService.ts`), donc un recepteur qui construit un planning n'a qu'un
+ * seul type d'evenement a ecouter pour connaitre l'etat courant de n'importe quelle demande,
+ * plutot que d'avoir a recomposer l'etat a partir de deux evenements distincts.
+ */
+export const ABSENCE_WEBHOOK_EVENT_TYPES: WebhookEventType[] = ["absence.updated"];
 
 /**
  * Signe le corps de la requete en HMAC-SHA256 avec le secret propre a chaque abonnement,

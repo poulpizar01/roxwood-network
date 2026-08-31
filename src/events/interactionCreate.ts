@@ -94,7 +94,7 @@ import {
 } from "../services/panelService.js";
 import { createAbsenceRequest, formatFrenchDate, getAbsenceRequest, parseFrenchDate, resolveAbsenceRequest } from "../services/absenceService.js";
 import { postAbsenceRequest, refreshAbsenceMessage } from "../services/absenceLogService.js";
-import { ABSENCE_WEBHOOK_EVENT_TYPES, MONITORING_WEBHOOK_EVENT_TYPES, type WebhookEventType } from "../services/webhookDispatcher.js";
+import { MONITORING_WEBHOOK_EVENT_TYPES, type WebhookEventType } from "../services/webhookDispatcher.js";
 import { createSubscription, listSubscriptions, removeSubscription } from "../services/webhookSubscriptionService.js";
 import type { MonitoringLogType } from "@prisma/client";
 import { logger } from "../utils/logger.js";
@@ -971,13 +971,11 @@ async function handlePanelAbsencesClearReviewChannel(interaction: Interaction): 
   await interaction.reply({ content: "Salon de suivi retiré.", ephemeral: true });
 }
 
-/** Libelle affichable de chaque type d'evenement webhook Absences. */
-const ABSENCE_WEBHOOK_TYPE_LABELS: Record<string, string> = {
-  "absence.created": "Nouvelle demande",
-  "absence.resolved": "Demande résolue",
-};
-
-/** Clic sur "Ajouter un webhook" (Absences) : d'abord choisir le type d'evenement concerne. */
+/**
+ * Clic sur "Ajouter un webhook" (Absences) : directement le modal de l'URL de destination —
+ * pas d'etape de choix de type comme Monitoring, un seul evenement `absence.updated` existe
+ * (voir `webhookDispatcher.ts`).
+ */
 async function handlePanelAbsencesAddWebhook(interaction: Interaction): Promise<void> {
   if (!interaction.isButton()) return;
   if (!isGuildManager(interaction)) {
@@ -985,33 +983,22 @@ async function handlePanelAbsencesAddWebhook(interaction: Interaction): Promise<
     return;
   }
 
-  const options = ABSENCE_WEBHOOK_EVENT_TYPES.map((eventType) => ({ label: ABSENCE_WEBHOOK_TYPE_LABELS[eventType], value: eventType }));
-  const select = new StringSelectMenuBuilder().setCustomId("panel:absences:add-webhook-type").setPlaceholder("Choisir un type").addOptions(options);
-  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
-  await interaction.reply({ components: [row], ephemeral: true });
-}
-
-/** Type choisi : modal pour l'URL de destination. */
-async function handleAbsencesAddWebhookType(interaction: Interaction): Promise<void> {
-  if (!interaction.isStringSelectMenu()) return;
-
-  const eventType = interaction.values[0];
-  const modal = new ModalBuilder().setCustomId(`panel:absences:add-webhook-modal:${eventType}`).setTitle("Ajouter un webhook");
+  const modal = new ModalBuilder().setCustomId("panel:absences:add-webhook-modal").setTitle("Ajouter un webhook");
   const urlInput = new TextInputBuilder().setCustomId("url").setLabel("URL de destination").setStyle(TextInputStyle.Short).setRequired(true);
   modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(urlInput));
   await interaction.showModal(modal);
 }
 
 /** Soumission de l'URL : cree l'abonnement et affiche le secret en clair, meme raisonnement que Monitoring. */
-async function handleAbsencesAddWebhookModal(interaction: Interaction, eventType: string): Promise<void> {
+async function handleAbsencesAddWebhookModal(interaction: Interaction): Promise<void> {
   if (!interaction.isModalSubmit() || !interaction.guildId || !interaction.channelId) return;
 
   const url = interaction.fields.getTextInputValue("url").trim();
-  const { secret } = await createSubscription(interaction.guildId, eventType as WebhookEventType, url);
+  const { secret } = await createSubscription(interaction.guildId, "absence.updated", url);
   await refreshAbsencesPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
   await interaction.reply({
     content:
-      `Webhook \`${eventType}\` ajouté vers ${url}.\n` +
+      `Webhook \`absence.updated\` ajouté vers ${url}.\n` +
       `Secret de signature (header \`X-Signature-256\`, HMAC-SHA256) — **note-le, il ne sera plus jamais affiché** :\n\`${secret}\`\n\n` +
       "⚠️ Ce secret doit rester **côté serveur uniquement** (variable d'environnement du site, jamais dans du code envoyé au navigateur, jamais commité sur un dépôt public) — sinon n'importe quel visiteur du site pourrait le récupérer.",
     ephemeral: true,
@@ -2155,7 +2142,6 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:faq:remove-rule-select") return await handleFaqRemoveRuleSelect(interaction);
       if (interaction.customId === "panel:monitoring:add-webhook-type") return await handleMonitoringAddWebhookType(interaction);
       if (interaction.customId === "panel:monitoring:remove-webhook-select") return await handleMonitoringRemoveWebhookSelect(interaction);
-      if (interaction.customId === "panel:absences:add-webhook-type") return await handleAbsencesAddWebhookType(interaction);
       if (interaction.customId === "panel:absences:remove-webhook-select") return await handleAbsencesRemoveWebhookSelect(interaction);
       return;
     }
@@ -2186,9 +2172,7 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId.startsWith("panel:monitoring:add-webhook-modal:")) {
         return await handleMonitoringAddWebhookModal(interaction, interaction.customId.slice("panel:monitoring:add-webhook-modal:".length));
       }
-      if (interaction.customId.startsWith("panel:absences:add-webhook-modal:")) {
-        return await handleAbsencesAddWebhookModal(interaction, interaction.customId.slice("panel:absences:add-webhook-modal:".length));
-      }
+      if (interaction.customId === "panel:absences:add-webhook-modal") return await handleAbsencesAddWebhookModal(interaction);
       if (interaction.customId.startsWith("order:submit-item:")) {
         const catalogItemId = interaction.customId.slice("order:submit-item:".length);
         return await handleOrderSubmitItem(interaction, catalogItemId);

@@ -5,7 +5,7 @@ import { getGuildConfig } from "./guildConfigService.js";
 import { findLatestRecruitmentTicketByOpener } from "./ticketService.js";
 import { getApplication, setStatus as setApplicationStatus } from "./recruitmentService.js";
 import { applyRecruitmentAcceptance, refreshRecruitmentLogMessage } from "./recruitmentLogService.js";
-import { recordSafeMovement } from "./monitoringSafeService.js";
+import { getItemStock, recordSafeMovement } from "./monitoringSafeService.js";
 import { dispatchWebhook, type WebhookEventType } from "./webhookDispatcher.js";
 import {
   parseInvoice,
@@ -81,14 +81,19 @@ export async function ingestMonitoringMessage(message: Message<true>): Promise<b
         },
       });
 
+      // Certains effets de bord calculent une donnee derivee utile au webhook sortant (ex: le
+      // niveau de stock apres un mouvement de coffre) que le parsing seul ne peut pas connaitre
+      // (il faut interroger la base) — fusionnee dans `parsed` plutot que d'exposer un objet
+      // separe, le recepteur externe n'a qu'un seul endroit a regarder pour les donnees calculees.
+      let sideEffectExtra: Record<string, unknown> | undefined;
       if (parsed) {
-        await applySideEffect(message, config, channelConfig.type, fields, parsed);
+        sideEffectExtra = await applySideEffect(message, config, channelConfig.type, fields, parsed);
       }
 
       await dispatchWebhook(message.guildId, WEBHOOK_EVENT_BY_TYPE[channelConfig.type], {
         ...fields,
         description,
-        parsed: parsed ?? null,
+        parsed: parsed ? { ...parsed, ...sideEffectExtra } : null,
       });
     }
 
@@ -120,7 +125,7 @@ async function applySideEffect(
   type: MonitoringLogType,
   fields: Record<string, string>,
   parsed: NonNullable<ReturnType<typeof parseByType>>
-): Promise<void> {
+): Promise<Record<string, unknown> | undefined> {
   // `type` (deduit du salon, voir `ingestMonitoringMessage`) et `parsed` (issu de
   // `parseByType(type, ...)`) sont deux parametres distincts du point de vue de TypeScript,
   // qui ne peut pas prouver leur correlation — on force le type ici plutot que de compter sur
@@ -162,9 +167,13 @@ async function applySideEffect(
     const safe = parsed as SafeParseResult;
     if (!fields.targetPosition || !fields.itemId) return;
     const signedQuantity = safe.direction === "in" ? safe.quantity : -safe.quantity;
-    await recordSafeMovement(message.guildId, fields.targetPosition, fields.itemId, signedQuantity, {
+    const movement = await recordSafeMovement(message.guildId, fields.targetPosition, fields.itemId, signedQuantity, {
       discordId: fields.playerDiscord,
       name: fields.playerName,
     });
+    const stockAfter = await getItemStock(movement.safeId, fields.itemId);
+    return { stockAfter };
   }
+
+  return undefined;
 }

@@ -1,4 +1,4 @@
-import type { AbsenceStatus } from "@prisma/client";
+import type { AbsenceRequest, AbsenceStatus } from "@prisma/client";
 import { prisma } from "../db/prisma.js";
 import { dispatchWebhook } from "./webhookDispatcher.js";
 
@@ -40,6 +40,25 @@ export function formatFrenchDate(date: Date): string {
   return `${day}/${month}/${year}`;
 }
 
+/**
+ * Envoie l'etat complet et courant d'une demande (declaration ou resolution, meme forme dans
+ * les deux cas) sur l'unique evenement `absence.updated` — un recepteur qui construit un
+ * planning n'a donc qu'un type d'evenement a ecouter pour toujours avoir la derniere version
+ * de n'importe quelle demande, sans avoir a fusionner plusieurs evenements lui-meme.
+ */
+async function dispatchAbsenceUpdated(request: AbsenceRequest): Promise<void> {
+  await dispatchWebhook(request.guildId, "absence.updated", {
+    requestId: request.id,
+    requesterId: request.requesterId,
+    startDate: request.startDate.toISOString(),
+    endDate: request.endDate.toISOString(),
+    reason: request.reason,
+    status: request.status,
+    resolverId: request.resolverId,
+    resolvedAt: request.resolvedAt?.toISOString() ?? null,
+  });
+}
+
 /** Cree une demande d'absence (statut PENDING par defaut). */
 export async function createAbsenceRequest(
   guildId: string,
@@ -49,16 +68,7 @@ export async function createAbsenceRequest(
   reason: string
 ) {
   const request = await prisma.absenceRequest.create({ data: { guildId, requesterId, startDate, endDate, reason } });
-
-  await dispatchWebhook(guildId, "absence.created", {
-    requestId: request.id,
-    requesterId: request.requesterId,
-    startDate: request.startDate.toISOString(),
-    endDate: request.endDate.toISOString(),
-    reason: request.reason,
-    status: request.status,
-  });
-
+  await dispatchAbsenceUpdated(request);
   return request;
 }
 
@@ -70,15 +80,7 @@ export async function saveAbsenceMessageRef(id: string, messageId: string) {
 /** Accepte ou refuse une demande d'absence encore en attente. */
 export async function resolveAbsenceRequest(id: string, resolverId: string, status: AbsenceStatus) {
   const request = await prisma.absenceRequest.update({ where: { id }, data: { status, resolverId, resolvedAt: new Date() } });
-
-  await dispatchWebhook(request.guildId, "absence.resolved", {
-    requestId: request.id,
-    requesterId: request.requesterId,
-    status: request.status,
-    resolverId: request.resolverId,
-    resolvedAt: request.resolvedAt?.toISOString() ?? null,
-  });
-
+  await dispatchAbsenceUpdated(request);
   return request;
 }
 

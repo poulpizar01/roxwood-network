@@ -46,6 +46,19 @@ export async function listSafes(guildId: string) {
   return prisma.monitoringSafe.findMany({ where: { guildId }, orderBy: { positionKey: "asc" } });
 }
 
+/**
+ * Stock courant d'un seul item dans un coffre, juste apres un mouvement — utilise pour
+ * enrichir le webhook sortant `monitoring.safe` d'un niveau de stock plutot que du seul
+ * mouvement ponctuel (voir `monitoringService.applySideEffect`).
+ */
+export async function getItemStock(safeId: string, itemId: string): Promise<number> {
+  const result = await prisma.monitoringSafeMovement.aggregate({
+    where: { safeId, itemId },
+    _sum: { quantity: true },
+  });
+  return result._sum.quantity ?? 0;
+}
+
 /** Stock courant (par item) d'un coffre precis. */
 export async function getStockForSafe(safeId: string): Promise<{ itemId: string; quantity: number }[]> {
   const rows = await prisma.monitoringSafeMovement.groupBy({
