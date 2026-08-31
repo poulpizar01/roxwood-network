@@ -18,14 +18,21 @@ export type WebhookEventType =
   | "absence.updated"
   | "order.updated";
 
-/** Types d'evenements "monitoring.*" geres par le panneau (voir `panelService.buildMonitoringPanelRows`). */
-export const MONITORING_WEBHOOK_EVENT_TYPES: WebhookEventType[] = [
-  "monitoring.shift",
-  "monitoring.recruitment",
-  "monitoring.safe",
-  "monitoring.invoice",
-  "monitoring.sale",
-];
+/**
+ * Libelle affichable de chaque type d'evenement, et source de verite de la liste complete —
+ * tous les abonnements webhook se gerent depuis le panneau "Monitoring", quel que soit le
+ * domaine de l'evenement (choix explicite de l'utilisateur : un seul endroit centralise
+ * plutot qu'un bouton "Ajouter un webhook" disperse sur chaque panneau concerne).
+ */
+export const WEBHOOK_EVENT_LABELS: Record<WebhookEventType, string> = {
+  "monitoring.shift": "Prise de service (Monitoring)",
+  "monitoring.recruitment": "Recrutement (Monitoring)",
+  "monitoring.safe": "Coffre (Monitoring)",
+  "monitoring.invoice": "Facture (Monitoring)",
+  "monitoring.sale": "Vente run (Monitoring)",
+  "absence.updated": "Absences",
+  "order.updated": "Commandes",
+};
 
 /**
  * Signe le corps de la requete en HMAC-SHA256 avec le secret propre a chaque abonnement,

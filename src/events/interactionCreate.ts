@@ -104,7 +104,7 @@ import {
 } from "../services/panelService.js";
 import { createAbsenceRequest, formatFrenchDate, getAbsenceRequest, parseFrenchDate, resolveAbsenceRequest } from "../services/absenceService.js";
 import { postAbsenceRequest, refreshAbsenceMessage } from "../services/absenceLogService.js";
-import { MONITORING_WEBHOOK_EVENT_TYPES, type WebhookEventType } from "../services/webhookDispatcher.js";
+import { WEBHOOK_EVENT_LABELS, type WebhookEventType } from "../services/webhookDispatcher.js";
 import { createSubscription, listSubscriptions, removeSubscription } from "../services/webhookSubscriptionService.js";
 import type { MonitoringLogType } from "@prisma/client";
 import { logger } from "../utils/logger.js";
@@ -1014,69 +1014,6 @@ async function handlePanelAbsencesClearReviewChannel(interaction: Interaction): 
   await interaction.reply({ content: "Salon de suivi retiré.", ephemeral: true });
 }
 
-/**
- * Clic sur "Ajouter un webhook" (Absences) : directement le modal de l'URL de destination —
- * pas d'etape de choix de type comme Monitoring, un seul evenement `absence.updated` existe
- * (voir `webhookDispatcher.ts`).
- */
-async function handlePanelAbsencesAddWebhook(interaction: Interaction): Promise<void> {
-  if (!interaction.isButton()) return;
-  if (!isGuildManager(interaction)) {
-    await interaction.reply({ content: NOT_GUILD_MANAGER_MESSAGE, ephemeral: true });
-    return;
-  }
-
-  const modal = new ModalBuilder().setCustomId("panel:absences:add-webhook-modal").setTitle("Ajouter un webhook");
-  const urlInput = new TextInputBuilder().setCustomId("url").setLabel("URL de destination").setStyle(TextInputStyle.Short).setRequired(true);
-  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(urlInput));
-  await interaction.showModal(modal);
-}
-
-/** Soumission de l'URL : cree l'abonnement et affiche le secret en clair, meme raisonnement que Monitoring. */
-async function handleAbsencesAddWebhookModal(interaction: Interaction): Promise<void> {
-  if (!interaction.isModalSubmit() || !interaction.guildId || !interaction.channelId) return;
-
-  const url = interaction.fields.getTextInputValue("url").trim();
-  const { secret } = await createSubscription(interaction.guildId, "absence.updated", url);
-  await refreshAbsencesPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
-  await interaction.reply({
-    content:
-      `Webhook \`absence.updated\` ajouté vers ${url}.\n` +
-      `Secret de signature (header \`X-Signature-256\`, HMAC-SHA256) — **note-le, il ne sera plus jamais affiché** :\n\`${secret}\`\n\n` +
-      "⚠️ Ce secret doit rester **côté serveur uniquement** (variable d'environnement du site, jamais dans du code envoyé au navigateur, jamais commité sur un dépôt public) — sinon n'importe quel visiteur du site pourrait le récupérer.",
-    ephemeral: true,
-  });
-}
-
-/** Clic sur "Retirer un webhook" (Absences) : menu natif des abonnements absence.* existants. */
-async function handlePanelAbsencesRemoveWebhook(interaction: Interaction): Promise<void> {
-  if (!interaction.isButton() || !interaction.guildId) return;
-  if (!isGuildManager(interaction)) {
-    await interaction.reply({ content: NOT_GUILD_MANAGER_MESSAGE, ephemeral: true });
-    return;
-  }
-
-  const subscriptions = (await listSubscriptions(interaction.guildId)).filter((s) => s.eventType.startsWith("absence."));
-  if (subscriptions.length === 0) {
-    await interaction.reply({ content: "Aucun webhook configuré.", ephemeral: true });
-    return;
-  }
-
-  const select = new StringSelectMenuBuilder()
-    .setCustomId("panel:absences:remove-webhook-select")
-    .setPlaceholder("Choisir un webhook à retirer")
-    .addOptions(subscriptions.slice(0, 25).map((s) => ({ label: `${s.eventType} — ${s.url}`.slice(0, 100), value: s.id })));
-  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
-  await interaction.reply({ components: [row], ephemeral: true });
-}
-
-async function handleAbsencesRemoveWebhookSelect(interaction: Interaction): Promise<void> {
-  if (!interaction.isStringSelectMenu() || !interaction.guildId || !interaction.channelId) return;
-
-  await removeSubscription(interaction.guildId, interaction.values[0]);
-  await refreshAbsencesPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
-  await interaction.update({ content: "Webhook retiré.", components: [] });
-}
 
 /**
  * Clic sur "Accepter"/"Refuser" du message de suivi d'une demande d'absence : reserve au
@@ -1439,68 +1376,6 @@ async function handlePanelServiceClearBanner(interaction: Interaction): Promise<
   await interaction.reply({ content: "Bannière retirée.", ephemeral: true });
 }
 
-/**
- * Clic sur "Ajouter un webhook" (Service client) : directement le modal de l'URL de
- * destination — un seul evenement `order.updated` existe (voir `webhookDispatcher.ts`).
- */
-async function handlePanelServiceAddWebhook(interaction: Interaction): Promise<void> {
-  if (!interaction.isButton()) return;
-  if (!isGuildManager(interaction)) {
-    await interaction.reply({ content: NOT_GUILD_MANAGER_MESSAGE, ephemeral: true });
-    return;
-  }
-
-  const modal = new ModalBuilder().setCustomId("panel:service:add-webhook-modal").setTitle("Ajouter un webhook");
-  const urlInput = new TextInputBuilder().setCustomId("url").setLabel("URL de destination").setStyle(TextInputStyle.Short).setRequired(true);
-  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(urlInput));
-  await interaction.showModal(modal);
-}
-
-/** Soumission de l'URL : cree l'abonnement et affiche le secret en clair, meme raisonnement que Monitoring/Absences. */
-async function handleServiceAddWebhookModal(interaction: Interaction): Promise<void> {
-  if (!interaction.isModalSubmit() || !interaction.guildId || !interaction.channelId) return;
-
-  const url = interaction.fields.getTextInputValue("url").trim();
-  const { secret } = await createSubscription(interaction.guildId, "order.updated", url);
-  await refreshServicePanelMessage(interaction.client, interaction.guildId, interaction.channelId);
-  await interaction.reply({
-    content:
-      `Webhook \`order.updated\` ajouté vers ${url}.\n` +
-      `Secret de signature (header \`X-Signature-256\`, HMAC-SHA256) — **note-le, il ne sera plus jamais affiché** :\n\`${secret}\`\n\n` +
-      "⚠️ Ce secret doit rester **côté serveur uniquement** (variable d'environnement du site, jamais dans du code envoyé au navigateur, jamais commité sur un dépôt public) — sinon n'importe quel visiteur du site pourrait le récupérer.",
-    ephemeral: true,
-  });
-}
-
-/** Clic sur "Retirer un webhook" (Service client) : menu natif des abonnements order.* existants. */
-async function handlePanelServiceRemoveWebhook(interaction: Interaction): Promise<void> {
-  if (!interaction.isButton() || !interaction.guildId) return;
-  if (!isGuildManager(interaction)) {
-    await interaction.reply({ content: NOT_GUILD_MANAGER_MESSAGE, ephemeral: true });
-    return;
-  }
-
-  const subscriptions = (await listSubscriptions(interaction.guildId)).filter((s) => s.eventType.startsWith("order."));
-  if (subscriptions.length === 0) {
-    await interaction.reply({ content: "Aucun webhook configuré.", ephemeral: true });
-    return;
-  }
-
-  const select = new StringSelectMenuBuilder()
-    .setCustomId("panel:service:remove-webhook-select")
-    .setPlaceholder("Choisir un webhook à retirer")
-    .addOptions(subscriptions.slice(0, 25).map((s) => ({ label: `${s.eventType} — ${s.url}`.slice(0, 100), value: s.id })));
-  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
-  await interaction.reply({ components: [row], ephemeral: true });
-}
-
-async function handleServiceRemoveWebhookSelect(interaction: Interaction): Promise<void> {
-  if (!interaction.isStringSelectMenu() || !interaction.guildId || !interaction.channelId) return;
-
-  await removeSubscription(interaction.guildId, interaction.values[0]);
-  await refreshServicePanelMessage(interaction.client, interaction.guildId, interaction.channelId);
-  await interaction.update({ content: "Webhook retiré.", components: [] });
-}
 
 /** Clic sur "Ajouter un champ" : d'abord choisir l'article concerne. */
 async function handlePanelServiceAddField(interaction: Interaction): Promise<void> {
@@ -2019,7 +1894,11 @@ async function handlePanelMonitoringClearChannel(interaction: Interaction, type:
   await interaction.reply({ content: `Salon ${MONITORING_TYPE_LABELS[type]} retiré.`, ephemeral: true });
 }
 
-/** Clic sur "Ajouter un webhook" : d'abord choisir le type d'evenement concerne. */
+/**
+ * Clic sur "Ajouter un webhook" : d'abord choisir le type d'evenement concerne, parmi TOUS
+ * les types existants (pas seulement `monitoring.*`) — ce panneau est le point unique de
+ * gestion des webhooks sortants pour toute fonctionnalite du bot.
+ */
 async function handlePanelMonitoringAddWebhook(interaction: Interaction): Promise<void> {
   if (!interaction.isButton()) return;
   if (!isGuildManager(interaction)) {
@@ -2027,10 +1906,10 @@ async function handlePanelMonitoringAddWebhook(interaction: Interaction): Promis
     return;
   }
 
-  const options = MONITORING_WEBHOOK_EVENT_TYPES.map((eventType) => {
-    const type = eventType.replace("monitoring.", "").toUpperCase() as MonitoringLogType;
-    return { label: MONITORING_TYPE_LABELS[type], value: eventType };
-  });
+  const options = (Object.keys(WEBHOOK_EVENT_LABELS) as WebhookEventType[]).map((eventType) => ({
+    label: WEBHOOK_EVENT_LABELS[eventType],
+    value: eventType,
+  }));
   const select = new StringSelectMenuBuilder().setCustomId("panel:monitoring:add-webhook-type").setPlaceholder("Choisir un type").addOptions(options);
   const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
   await interaction.reply({ components: [row], ephemeral: true });
@@ -2160,8 +2039,6 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:absences:set-approver-roles") return await handlePanelAbsencesSetApproverRoles(interaction);
       if (interaction.customId === "panel:absences:set-review-channel") return await handlePanelAbsencesSetReviewChannel(interaction);
       if (interaction.customId === "panel:absences:clear-review-channel") return await handlePanelAbsencesClearReviewChannel(interaction);
-      if (interaction.customId === "panel:absences:add-webhook") return await handlePanelAbsencesAddWebhook(interaction);
-      if (interaction.customId === "panel:absences:remove-webhook") return await handlePanelAbsencesRemoveWebhook(interaction);
       if (interaction.customId.startsWith("absence:accept:")) {
         return await handleAbsenceResolve(interaction, interaction.customId.slice("absence:accept:".length), "ACCEPTED");
       }
@@ -2179,8 +2056,6 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:service:set-shop-profile") return await handlePanelServiceSetShopProfile(interaction);
       if (interaction.customId === "panel:service:set-banner") return await handlePanelServiceSetBanner(interaction);
       if (interaction.customId === "panel:service:clear-banner") return await handlePanelServiceClearBanner(interaction);
-      if (interaction.customId === "panel:service:add-webhook") return await handlePanelServiceAddWebhook(interaction);
-      if (interaction.customId === "panel:service:remove-webhook") return await handlePanelServiceRemoveWebhook(interaction);
       if (interaction.customId === "panel:recruitment:set-category") return await handlePanelRecruitmentSetCategory(interaction);
       if (interaction.customId === "panel:recruitment:clear-category") return await handlePanelRecruitmentClearCategory(interaction);
       if (interaction.customId === "panel:recruitment:toggle") return await handlePanelRecruitmentToggle(interaction);
@@ -2270,8 +2145,6 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:faq:remove-rule-select") return await handleFaqRemoveRuleSelect(interaction);
       if (interaction.customId === "panel:monitoring:add-webhook-type") return await handleMonitoringAddWebhookType(interaction);
       if (interaction.customId === "panel:monitoring:remove-webhook-select") return await handleMonitoringRemoveWebhookSelect(interaction);
-      if (interaction.customId === "panel:absences:remove-webhook-select") return await handleAbsencesRemoveWebhookSelect(interaction);
-      if (interaction.customId === "panel:service:remove-webhook-select") return await handleServiceRemoveWebhookSelect(interaction);
       return;
     }
 
@@ -2301,8 +2174,6 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId.startsWith("panel:monitoring:add-webhook-modal:")) {
         return await handleMonitoringAddWebhookModal(interaction, interaction.customId.slice("panel:monitoring:add-webhook-modal:".length));
       }
-      if (interaction.customId === "panel:absences:add-webhook-modal") return await handleAbsencesAddWebhookModal(interaction);
-      if (interaction.customId === "panel:service:add-webhook-modal") return await handleServiceAddWebhookModal(interaction);
       if (interaction.customId.startsWith("order:submit-item:")) {
         const catalogItemId = interaction.customId.slice("order:submit-item:".length);
         return await handleOrderSubmitItem(interaction, catalogItemId);

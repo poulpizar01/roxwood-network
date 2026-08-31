@@ -166,7 +166,8 @@ export function buildTicketsPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
  * Embed du message dedie "Absences" : recapitule la configuration (role approbateur, salon
  * de suivi). La declaration elle-meme se fait via `/absence` (commande accessible a tout le
  * monde, pas un bouton ici — ce salon de panneau est reserve a la config, potentiellement
- * invisible aux membres non-staff).
+ * invisible aux membres non-staff). Les webhooks sortants ne se gerent plus ici : voir le
+ * panneau "Monitoring", point unique de gestion pour tous les types d'evenements.
  */
 export async function buildAbsencesPanelEmbed(guildId: string): Promise<EmbedBuilder> {
   const config = await getGuildConfig(guildId);
@@ -174,19 +175,11 @@ export async function buildAbsencesPanelEmbed(guildId: string): Promise<EmbedBui
   const roles = roleIds.length ? roleIds.map((r) => `<@&${r}>`).join(" ") : "Non configuré";
   const channel = config?.absenceReviewChannelId ? `<#${config.absenceReviewChannelId}>` : "Non configuré";
   const ready = Boolean(roleIds.length && config?.absenceReviewChannelId);
-  const subscriptions = (await listSubscriptions(guildId)).filter((s) => s.eventType.startsWith("absence."));
-  const webhooksText = subscriptions.length
-    ? subscriptions.map((s) => `\`${s.eventType}\` → ${s.url.slice(0, 60)} (${s.enabled ? "actif" : "inactif"})`).join("\n")
-    : "Aucun webhook configuré.";
 
   return new EmbedBuilder()
     .setTitle("Absences")
     .setColor(0x5865f2)
-    .addFields(
-      { name: "Rôles approbateurs", value: roles, inline: true },
-      { name: "Salon de suivi", value: channel, inline: true },
-      { name: "Webhooks sortants", value: webhooksText }
-    )
+    .addFields({ name: "Rôles approbateurs", value: roles, inline: true }, { name: "Salon de suivi", value: channel, inline: true })
     .setDescription(
       ready
         ? "Les membres peuvent déclarer une absence avec la commande /absence."
@@ -197,9 +190,8 @@ export async function buildAbsencesPanelEmbed(guildId: string): Promise<EmbedBui
 /**
  * Boutons de configuration du message dedie "Absences" : roles approbateurs (multi-select
  * Discord natif, remplace la selection entiere a chaque usage — voir
- * `panel:absences:set-approver-roles`), salon de suivi (bouton unique Definir/Retirer selon
- * l'etat courant, meme convention que les categories de ticket), et abonnements au webhook
- * sortant "absence.updated" (meme mecanisme HMAC que Monitoring, scope distinct).
+ * `panel:absences:set-approver-roles`) et salon de suivi (bouton unique Definir/Retirer selon
+ * l'etat courant, meme convention que les categories de ticket).
  */
 export function buildAbsencesPanelRows(reviewChannelId: string | null): ActionRowBuilder<ButtonBuilder>[] {
   const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -209,11 +201,7 @@ export function buildAbsencesPanelRows(reviewChannelId: string | null): ActionRo
       .setLabel(reviewChannelId ? "Retirer le salon de suivi" : "Définir le salon de suivi")
       .setStyle(reviewChannelId ? ButtonStyle.Danger : ButtonStyle.Success)
   );
-  const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("panel:absences:add-webhook").setLabel("Ajouter un webhook").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("panel:absences:remove-webhook").setLabel("Retirer un webhook").setStyle(ButtonStyle.Danger)
-  );
-  return [row1, row2];
+  return [row1];
 }
 
 /**
@@ -256,14 +244,6 @@ export async function buildServicePanelEmbed(guildId: string): Promise<EmbedBuil
     ].join("\n"),
   });
 
-  const subscriptions = (await listSubscriptions(guildId)).filter((s) => s.eventType.startsWith("order."));
-  embed.addFields({
-    name: "Webhooks sortants",
-    value: subscriptions.length
-      ? subscriptions.map((s) => `\`${s.eventType}\` → ${s.url.slice(0, 60)} (${s.enabled ? "actif" : "inactif"})`).join("\n")
-      : "Aucun webhook configuré.",
-  });
-
   return embed;
 }
 
@@ -272,9 +252,9 @@ export async function buildServicePanelEmbed(guildId: string): Promise<EmbedBuil
  * selon l'etat courant — meme principe que le bouton ouvrir/fermer les recrutements) et profil
  * boutique (RIB/telephone/message/capacite camion regroupes dans un seul modal, banniere via
  * le meme mecanisme d'upload que la photo d'un article) sur la meme ligne ; gestion des
- * articles (ajout/retrait/photo/poids) et de leurs champs ; abonnements au webhook sortant
- * "order.updated" (meme mecanisme HMAC que Monitoring/Absences, pas de choix de type — un
- * seul evenement existe). Remplace entierement `/catalog add`/`remove`/`field-add`/`field-remove`.
+ * articles (ajout/retrait/photo/poids) et de leurs champs. Les webhooks sortants ne se gerent
+ * plus ici : voir le panneau "Monitoring", point unique de gestion pour tous les types
+ * d'evenements. Remplace entierement `/catalog add`/`remove`/`field-add`/`field-remove`.
  */
 export function buildServicePanelRows(categoryId: string | null, bannerConfigured: boolean): ActionRowBuilder<ButtonBuilder>[] {
   const categoryRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -300,11 +280,7 @@ export function buildServicePanelRows(categoryId: string | null, bannerConfigure
     new ButtonBuilder().setCustomId("panel:service:add-field").setLabel("Ajouter un champ").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("panel:service:remove-field").setLabel("Retirer un champ").setStyle(ButtonStyle.Danger)
   );
-  const row4 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("panel:service:add-webhook").setLabel("Ajouter un webhook").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("panel:service:remove-webhook").setLabel("Retirer un webhook").setStyle(ButtonStyle.Danger)
-  );
-  return [categoryRow, row1, row2, row3, row4];
+  return [categoryRow, row1, row2, row3];
 }
 
 /**
@@ -454,11 +430,14 @@ export const MONITORING_TYPE_LABELS: Record<MonitoringLogType, string> = {
 
 /**
  * Embed du message dedie "Monitoring" : jobId surveille, role "en service", salon configure
- * pour chaque type de log, et abonnements webhook sortants actifs.
+ * pour chaque type de log, et abonnements webhook sortants actifs — TOUS les types
+ * d'evenements, pas seulement `monitoring.*` : ce panneau est le point unique de gestion des
+ * webhooks pour l'ensemble du bot (choix explicite de l'utilisateur, plutot qu'un bouton
+ * "Ajouter un webhook" disperse sur chaque panneau concerne).
  */
 export async function buildMonitoringPanelEmbed(guildId: string): Promise<EmbedBuilder> {
   const config = await getGuildConfig(guildId);
-  const subscriptions = (await listSubscriptions(guildId)).filter((s) => s.eventType.startsWith("monitoring."));
+  const subscriptions = await listSubscriptions(guildId);
 
   const channelsText = (Object.keys(MONITORING_TYPE_LABELS) as MonitoringLogType[])
     .map((type) => {
