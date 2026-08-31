@@ -68,6 +68,10 @@ model GuildConfig {
   /// partir du poids total d'une commande (voir `CatalogItem.weightGrams`). `null` = "camions
   /// requis" jamais affiche sur la facture, meme si des articles ont un poids configure.
   truckCapacityGrams Int?
+  /// Dernier numero de facture attribue pour cette guilde (compteur sequentiel par entreprise,
+  /// incremente atomiquement a chaque nouvelle facture — voir `orderService.setInvoiceNumber`).
+  /// Le numero affiche est cet entier converti en chaine, sans prefixe ni lettre.
+  lastInvoiceNumber Int      @default(0)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

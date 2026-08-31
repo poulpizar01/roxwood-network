@@ -274,7 +274,7 @@ export async function sendInvoiceForOrder(
   ticket: { id: string; channelId: string; openerId: string | null },
   order: OrderWithItems
 ): Promise<void> {
-  const invoiceNumber = order.invoiceNumber ?? (await setInvoiceNumber(order.id));
+  const invoiceNumber = order.invoiceNumber ?? (await setInvoiceNumber(guildId, order.id));
 
   let guildName = "Roxwood Network";
   let customerLabel = "Client";

@@ -167,12 +167,18 @@ export function computeTotalWeightGrams(order: { items: { weightGrams: number | 
 }
 
 /**
- * Genere et persiste un numero de facture unique pour la commande, base sur l'horodatage
- * courant encode en base 36 (compact, lisible, sans avoir besoin d'un compteur transactionnel
- * partage entre guildes). Format : `INV-<timestamp base36 majuscule>`.
+ * Genere et persiste un numero de facture unique pour la commande : un compteur sequentiel
+ * propre a la guilde (`GuildConfig.lastInvoiceNumber`), incremente atomiquement (l'increment
+ * Prisma se traduit en `UPDATE ... SET x = x + 1` cote SQL, donc sans condition de course meme
+ * si deux factures sont generees au meme instant). Purement numerique, sans prefixe ni lettre.
  */
-export async function setInvoiceNumber(orderId: string): Promise<string> {
-  const invoiceNumber = `INV-${Date.now().toString(36).toUpperCase()}`;
+export async function setInvoiceNumber(guildId: string, orderId: string): Promise<string> {
+  const config = await prisma.guildConfig.update({
+    where: { guildId },
+    data: { lastInvoiceNumber: { increment: 1 } },
+    select: { lastInvoiceNumber: true },
+  });
+  const invoiceNumber = String(config.lastInvoiceNumber);
   await prisma.serviceOrder.update({ where: { id: orderId }, data: { invoiceNumber } });
   return invoiceNumber;
 }
