@@ -11,7 +11,7 @@ import { getGuildConfig, getCategoryType } from "../services/guildConfigService.
 import { trackTicketChannel } from "../services/ticketService.js";
 import { createApplication } from "../services/recruitmentService.js";
 import { getOrCreateOrder } from "../services/orderService.js";
-import { listActive } from "../services/catalogService.js";
+import { buildCatalogSelectOptions, listActive } from "../services/catalogService.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -73,14 +73,7 @@ async function postServiceIntro(channel: NonThreadGuildBasedChannel): Promise<vo
   const select = new StringSelectMenuBuilder()
     .setCustomId("order:select-item")
     .setPlaceholder("Choisir un article")
-    .addOptions(
-      // Un StringSelectMenu Discord accepte au plus 25 options.
-      items.slice(0, 25).map((item) => ({
-        label: item.name.slice(0, 100),
-        description: `${item.price.toLocaleString("fr-FR")} $`,
-        value: item.id,
-      }))
-    );
+    .addOptions(buildCatalogSelectOptions(items));
 
   const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
   await channel.send({ embeds: [embed], components: [row] });

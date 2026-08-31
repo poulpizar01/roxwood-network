@@ -1,7 +1,10 @@
 import {
   ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ChannelSelectMenuBuilder,
   ChannelType,
+  EmbedBuilder,
   ModalBuilder,
   PermissionFlagsBits,
   RoleSelectMenuBuilder,
@@ -28,6 +31,7 @@ import {
 import {
   addField,
   addItem,
+  buildCatalogSelectOptions,
   getItem,
   listActive,
   listActiveWithFields,
@@ -369,16 +373,47 @@ async function closeTicketIfRejected(interaction: ButtonInteraction | StringSele
 }
 
 /**
- * Selection d'un article dans le menu deroulant du catalogue : construit et affiche un
- * modal dynamique a partir des champs personnalises configures pour cet article par le
- * staff (`CatalogItemField`). Si l'article n'a aucun champ personnalise, affiche un unique
- * champ de confirmation optionnel plutot qu'un modal vide (Discord exige au moins un composant).
+ * Selection d'un article dans le menu deroulant du catalogue : affiche un embed de
+ * confirmation (nom, description complete, prix, photo) avant d'ouvrir le formulaire —
+ * Discord n'autorise qu'une seule reponse par interaction (soit un modal, soit un
+ * message/embed, jamais les deux), c'est donc la seule facon de montrer la photo de l'article
+ * avant que le client ne s'engage, le modal lui-meme ne pouvant afficher aucun contenu riche.
  */
 async function handleOrderSelectItem(interaction: Interaction): Promise<void> {
   if (!interaction.isStringSelectMenu()) return;
 
   const catalogItemId = interaction.values[0];
   const item = await getItem(interaction.guildId!, catalogItemId);
+  if (!item) {
+    await interaction.reply({ content: "Cet article n'existe plus.", ephemeral: true });
+    return;
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle(item.name)
+    .setColor(0x5865f2)
+    .addFields({ name: "Prix", value: `${item.price.toLocaleString("fr-FR")} $`, inline: true });
+  if (item.description) embed.setDescription(item.description);
+  if (item.imageUrl) embed.setImage(item.imageUrl);
+
+  const confirmButton = new ButtonBuilder().setCustomId(`order:confirm-item:${item.id}`).setLabel("Continuer").setStyle(ButtonStyle.Success);
+  await interaction.reply({
+    embeds: [embed],
+    components: [new ActionRowBuilder<ButtonBuilder>().addComponents(confirmButton)],
+    ephemeral: true,
+  });
+}
+
+/**
+ * Clic sur "Continuer" (embed de confirmation) : construit et affiche le modal dynamique a
+ * partir des champs personnalises configures pour cet article par le staff
+ * (`CatalogItemField`). Si l'article n'a aucun champ personnalise, affiche un unique champ de
+ * confirmation optionnel plutot qu'un modal vide (Discord exige au moins un composant).
+ */
+async function handleOrderConfirmItem(interaction: Interaction, catalogItemId: string): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId) return;
+
+  const item = await getItem(interaction.guildId, catalogItemId);
   if (!item) {
     await interaction.reply({ content: "Cet article n'existe plus.", ephemeral: true });
     return;
@@ -462,14 +497,7 @@ async function handleOrderAddMore(interaction: Interaction): Promise<void> {
   const select = new StringSelectMenuBuilder()
     .setCustomId("order:select-item")
     .setPlaceholder("Choisir un article")
-    .addOptions(
-      // Un StringSelectMenu Discord accepte au plus 25 options.
-      items.slice(0, 25).map((item) => ({
-        label: item.name.slice(0, 100),
-        description: `${item.price.toLocaleString("fr-FR")} $`,
-        value: item.id,
-      }))
-    );
+    .addOptions(buildCatalogSelectOptions(items));
 
   const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
   await interaction.reply({ components: [row], ephemeral: true });
@@ -2075,6 +2103,9 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
         return await handleRecruitmentStatusButton(interaction, interaction.customId.slice("recruitment:status:".length));
       }
       if (interaction.customId === "order:add-more") return await handleOrderAddMore(interaction);
+      if (interaction.customId.startsWith("order:confirm-item:")) {
+        return await handleOrderConfirmItem(interaction, interaction.customId.slice("order:confirm-item:".length));
+      }
       if (interaction.customId === "order:confirm") return await handleOrderConfirm(interaction);
       if (interaction.customId.startsWith("order:status:")) {
         return await handleOrderStatusButton(interaction, interaction.customId.slice("order:status:".length));

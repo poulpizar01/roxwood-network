@@ -43,6 +43,26 @@ export async function listActive(guildId: string) {
   });
 }
 
+/**
+ * Construit les options du menu deroulant catalogue vu par le client (`order:select-item`),
+ * prix et description combines dans le sous-texte de l'option (le seul endroit ou Discord
+ * permet d'afficher plus que le nom d'un article dans un menu) : un `StringSelectMenuOption`
+ * n'a que 100 caracteres de description, tronquee ici plutot que de forcer un choix entre les
+ * deux (le prix seul, deja affiche partout ailleurs, cede la place a la description si les
+ * deux ne tiennent pas).
+ */
+export function buildCatalogSelectOptions(items: { id: string; name: string; price: number; description: string | null }[]) {
+  return items.slice(0, 25).map((item) => {
+    const priceLabel = `${item.price.toLocaleString("fr-FR")} $`;
+    const full = item.description ? `${priceLabel} — ${item.description}` : priceLabel;
+    return {
+      label: item.name.slice(0, 100),
+      description: full.length <= 100 ? full : `${full.slice(0, 97)}...`,
+      value: item.id,
+    };
+  });
+}
+
 /** Comme `listActive`, avec les champs personnalises inclus — pour le recapitulatif du panneau. */
 export async function listActiveWithFields(guildId: string) {
   return prisma.catalogItem.findMany({
