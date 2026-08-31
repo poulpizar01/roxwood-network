@@ -94,7 +94,7 @@ La facture est un **embed Discord** (pas une image générée) : articles, sous-
 
 Panneau "Absences" → configurer les **rôles approbateurs** (sélection multiple, plusieurs paliers de management possibles — n'importe lequel de ces rôles peut traiter une demande) et le **salon de suivi** (séparé du salon panneau). Une fois les deux définis, n'importe quel membre peut déclarer une absence avec `/absence` (dates JJ/MM/AAAA + motif). La demande est postée dans le salon de suivi avec deux boutons **Accepter**/**Refuser**, réservés aux rôles approbateurs ; le message se met à jour en place (statut, qui a traité) une fois résolue.
 
-Le panneau expose aussi ses propres webhooks sortants (`absence.created` à la déclaration, `absence.resolved` à l'acceptation/au refus) via "Ajouter/Retirer un webhook" — même mécanisme de signature HMAC que Monitoring (voir la section Sécurité des webhooks sortants), mais scope et types d'événements distincts : les deux panneaux gèrent chacun leurs propres abonnements, un abonnement `absence.*` n'apparaît pas dans le récapitulatif Monitoring et inversement.
+Le panneau expose aussi son propre webhook sortant, `absence.updated`, envoyé à la fois à la déclaration et à la résolution (acceptation/refus) avec l'état complet de la demande à chaque fois (statut, dates, motif, qui a traité) — un seul type d'événement à écouter côté site pour reconstruire un planning, plutôt que deux événements distincts à recomposer soi-même. "Ajouter un webhook" va donc directement au champ URL (pas de sélection de type, il n'y en a qu'un) — même mécanisme de signature HMAC que Monitoring (voir la section Sécurité des webhooks sortants), mais géré indépendamment : un abonnement `absence.updated` n'apparaît pas dans le récapitulatif Monitoring et inversement.
 
 ## FAQ
 
@@ -112,7 +112,7 @@ Le script FiveM du serveur poste des logs d'activité en jeu (embeds webhook) da
 Effets automatiques :
 - **Prise de service** : bascule le rôle "en service" du membre concerné.
 - **Recrutement** (embauche uniquement) : si un ticket de candidature existe pour ce joueur (`Ticket.openerId` = `targetPlayerDiscord` du log), passe son statut à **Accepté** et met à jour le message de suivi. Licenciements et changements de grade sont journalisés mais sans effet automatique pour l'instant.
-- **Coffre** : chaque dépôt/retrait alimente un ledger par coffre (identifié par sa position) — consultable uniquement via le webhook sortant `monitoring.safe`, pas de commande Discord (voir plus bas pourquoi).
+- **Coffre** : chaque dépôt/retrait alimente un ledger par coffre (identifié par sa position) — consultable uniquement via le webhook sortant `monitoring.safe`, pas de commande Discord (voir plus bas pourquoi). Le payload porte à la fois le mouvement ponctuel (`parsed.direction`/`quantity`) et le niveau de stock résultant de cet item dans ce coffre (`parsed.stockAfter`) : pas besoin de sommer soi-même l'historique des mouvements côté récepteur pour connaître le stock courant.
 - **Facture / Vente run** : journalisés pour les statistiques (montant, taxes, quantités) et relayés par webhook sortant — aucun effet automatique.
 
 Tout log reçu (que le texte libre de sa description ait pu être parsé ou non) est conservé en base (`MonitoringEvent`) et jamais perdu — un format de description inattendu désactive juste l'effet automatique correspondant (avertissement loggé), le reste continue de fonctionner.
@@ -138,7 +138,7 @@ Les actions sensibles du panneau "Monitoring" (jobId, rôle "en service", salons
 ## Points d'extension
 
 - `src/services/autoReplyService.ts` : interface `AutoReplyMatcher`, un seul matcher mot-clé fourni. Ajouter un matcher IA (ex: Claude API) ici sans toucher au reste.
-- `src/services/webhookDispatcher.ts` : webhooks sortants signés HMAC (header `X-Signature-256`) sur les événements `ticket.created`, `ticket.closed`, `monitoring.shift`, `monitoring.recruitment`, `monitoring.safe`, `monitoring.invoice`, `monitoring.sale`, `absence.created`, `absence.resolved` — point de branchement générique pour un CRM/site externe, tous gérés sans accès DB directement depuis le panneau correspondant (Monitoring pour `monitoring.*`, Absences pour `absence.*`). `ticket.created`/`ticket.closed` sont dispatchés par le code mais n'ont pour l'instant aucune UI panneau pour s'y abonner (créable uniquement via la table `WebhookSubscription` en base) — a construire si un usage se présente, même schéma que les deux autres panneaux.
+- `src/services/webhookDispatcher.ts` : webhooks sortants signés HMAC (header `X-Signature-256`) sur les événements `ticket.created`, `ticket.closed`, `monitoring.shift`, `monitoring.recruitment`, `monitoring.safe`, `monitoring.invoice`, `monitoring.sale`, `absence.updated` — point de branchement générique pour un CRM/site externe, tous gérés sans accès DB directement depuis le panneau correspondant (Monitoring pour `monitoring.*`, Absences pour `absence.updated`). `ticket.created`/`ticket.closed` sont dispatchés par le code mais n'ont pour l'instant aucune UI panneau pour s'y abonner (créable uniquement via la table `WebhookSubscription` en base) — a construire si un usage se présente, même schéma que les deux autres panneaux.
 
 ## À vérifier sur le vrai serveur
 
