@@ -104,8 +104,14 @@ import {
 } from "../services/panelService.js";
 import { createAbsenceRequest, formatFrenchDate, getAbsenceRequest, parseFrenchDate, resolveAbsenceRequest } from "../services/absenceService.js";
 import { postAbsenceRequest, refreshAbsenceMessage } from "../services/absenceLogService.js";
-import { WEBHOOK_EVENT_LABELS, type WebhookEventType } from "../services/webhookDispatcher.js";
-import { createSubscription, listSubscriptions, removeSubscription } from "../services/webhookSubscriptionService.js";
+import {
+  WEBHOOK_EVENT_LABELS,
+  describeSubscription,
+  dispatchCustomWebhook,
+  parseCustomPayload,
+  type WebhookEventType,
+} from "../services/webhookDispatcher.js";
+import { createSubscription, listCustomSubscriptions, listSubscriptions, removeSubscription } from "../services/webhookSubscriptionService.js";
 import type { MonitoringLogType } from "@prisma/client";
 import { logger } from "../utils/logger.js";
 import { buildImageAttachment } from "../utils/imageAttachment.js";
@@ -1915,12 +1921,26 @@ async function handlePanelMonitoringAddWebhook(interaction: Interaction): Promis
   await interaction.reply({ components: [row], ephemeral: true });
 }
 
-/** Type choisi : modal pour l'URL de destination. */
+/**
+ * Type choisi : modal pour l'URL de destination — avec un champ "nom" supplementaire pour le
+ * type "custom", puisque plusieurs abonnements custom peuvent coexister (un par recepteur, ex:
+ * un par Google Sheet) et doivent pouvoir se distinguer l'un de l'autre au moment de l'envoi.
+ */
 async function handleMonitoringAddWebhookType(interaction: Interaction): Promise<void> {
   if (!interaction.isStringSelectMenu()) return;
 
   const eventType = interaction.values[0];
   const modal = new ModalBuilder().setCustomId(`panel:monitoring:add-webhook-modal:${eventType}`).setTitle("Ajouter un webhook");
+
+  if (eventType === "custom") {
+    const labelInput = new TextInputBuilder()
+      .setCustomId("label")
+      .setLabel("Nom (pour le retrouver ensuite)")
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(labelInput));
+  }
+
   const urlInput = new TextInputBuilder().setCustomId("url").setLabel("URL de destination").setStyle(TextInputStyle.Short).setRequired(true);
   modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(urlInput));
   await interaction.showModal(modal);
@@ -1934,11 +1954,12 @@ async function handleMonitoringAddWebhookModal(interaction: Interaction, eventTy
   if (!interaction.isModalSubmit() || !interaction.guildId || !interaction.channelId) return;
 
   const url = interaction.fields.getTextInputValue("url").trim();
-  const { secret } = await createSubscription(interaction.guildId, eventType as WebhookEventType, url);
+  const label = eventType === "custom" ? interaction.fields.getTextInputValue("label").trim() : undefined;
+  const { secret } = await createSubscription(interaction.guildId, eventType as WebhookEventType, url, label);
   await refreshMonitoringPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
   await interaction.reply({
     content:
-      `Webhook \`${eventType}\` ajouté vers ${url}.\n` +
+      `Webhook \`${label ?? eventType}\` ajouté vers ${url}.\n` +
       `Secret de signature (header \`X-Signature-256\`, HMAC-SHA256) — **note-le, il ne sera plus jamais affiché** :\n\`${secret}\`\n\n` +
       "⚠️ Ce secret doit rester **côté serveur uniquement** (variable d'environnement du site, jamais dans du code envoyé au navigateur, jamais commité sur un dépôt public) — sinon n'importe quel visiteur du site pourrait le récupérer.",
     ephemeral: true,
@@ -1962,9 +1983,75 @@ async function handlePanelMonitoringRemoveWebhook(interaction: Interaction): Pro
   const select = new StringSelectMenuBuilder()
     .setCustomId("panel:monitoring:remove-webhook-select")
     .setPlaceholder("Choisir un webhook à retirer")
-    .addOptions(subscriptions.slice(0, 25).map((s) => ({ label: `${s.eventType} — ${s.url}`.slice(0, 100), value: s.id })));
+    .addOptions(subscriptions.slice(0, 25).map((s) => ({ label: `${describeSubscription(s)} — ${s.url}`.slice(0, 100), value: s.id })));
   const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
   await interaction.reply({ components: [row], ephemeral: true });
+}
+
+/** Clic sur "Envoyer des données personnalisées" : choisir vers quel abonnement custom envoyer. */
+async function handlePanelMonitoringSendCustom(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId) return;
+  if (!isGuildManager(interaction)) {
+    await interaction.reply({ content: NOT_GUILD_MANAGER_MESSAGE, ephemeral: true });
+    return;
+  }
+
+  const subscriptions = await listCustomSubscriptions(interaction.guildId);
+  if (subscriptions.length === 0) {
+    await interaction.reply({
+      content: 'Aucun webhook personnalisé configuré — ajoutez-en un avec "Ajouter un webhook" (type "Personnalisé") avant de pouvoir envoyer des données.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("panel:monitoring:send-custom-select")
+    .setPlaceholder("Choisir la destination")
+    .addOptions(subscriptions.slice(0, 25).map((s) => ({ label: describeSubscription(s).slice(0, 100), value: s.id })));
+  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+  await interaction.reply({ components: [row], ephemeral: true });
+}
+
+/** Destination choisie : modal pour le contenu libre (une paire cle/valeur par ligne). */
+async function handleMonitoringSendCustomSelect(interaction: Interaction): Promise<void> {
+  if (!interaction.isStringSelectMenu()) return;
+
+  const subscriptionId = interaction.values[0];
+  const modal = new ModalBuilder()
+    .setCustomId(`panel:monitoring:send-custom-modal:${subscriptionId}`)
+    .setTitle("Envoyer des données");
+  const contentInput = new TextInputBuilder()
+    .setCustomId("content")
+    .setLabel("Contenu (une ligne par « clé: valeur »)")
+    .setPlaceholder("date de vente: 02/09/2026\nnuméro: 42\nformateur: Jean Dupont")
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(true);
+  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(contentInput));
+  await interaction.showModal(modal);
+}
+
+/** Soumission du contenu : parse les lignes et envoie a l'abonnement choisi, sans toucher aux autres. */
+async function handleMonitoringSendCustomModal(interaction: Interaction, subscriptionId: string): Promise<void> {
+  if (!interaction.isModalSubmit() || !interaction.guildId) return;
+
+  const raw = interaction.fields.getTextInputValue("content");
+  const data = parseCustomPayload(raw);
+  if (Object.keys(data).length === 0) {
+    await interaction.reply({
+      content: 'Aucune ligne au format "clé: valeur" reconnue — rien n\'a été envoyé.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const sent = await dispatchCustomWebhook(interaction.guildId, subscriptionId, data);
+  await interaction.reply({
+    content: sent
+      ? `Données envoyées :\n${Object.entries(data).map(([k, v]) => `**${k}** : ${v}`).join("\n")}`
+      : "Cet abonnement n'existe plus, rien n'a été envoyé.",
+    ephemeral: true,
+  });
 }
 
 async function handleMonitoringRemoveWebhookSelect(interaction: Interaction): Promise<void> {
@@ -2089,6 +2176,7 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       }
       if (interaction.customId === "panel:monitoring:add-webhook") return await handlePanelMonitoringAddWebhook(interaction);
       if (interaction.customId === "panel:monitoring:remove-webhook") return await handlePanelMonitoringRemoveWebhook(interaction);
+      if (interaction.customId === "panel:monitoring:send-custom") return await handlePanelMonitoringSendCustom(interaction);
       return;
     }
 
@@ -2145,6 +2233,7 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:faq:remove-rule-select") return await handleFaqRemoveRuleSelect(interaction);
       if (interaction.customId === "panel:monitoring:add-webhook-type") return await handleMonitoringAddWebhookType(interaction);
       if (interaction.customId === "panel:monitoring:remove-webhook-select") return await handleMonitoringRemoveWebhookSelect(interaction);
+      if (interaction.customId === "panel:monitoring:send-custom-select") return await handleMonitoringSendCustomSelect(interaction);
       return;
     }
 
@@ -2171,6 +2260,9 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       }
       if (interaction.customId === "panel:faq:add-rule-modal") return await handleFaqAddRuleModal(interaction);
       if (interaction.customId === "panel:monitoring:set-job-id-modal") return await handleMonitoringSetJobIdModal(interaction);
+      if (interaction.customId.startsWith("panel:monitoring:send-custom-modal:")) {
+        return await handleMonitoringSendCustomModal(interaction, interaction.customId.slice("panel:monitoring:send-custom-modal:".length));
+      }
       if (interaction.customId.startsWith("panel:monitoring:add-webhook-modal:")) {
         return await handleMonitoringAddWebhookModal(interaction, interaction.customId.slice("panel:monitoring:add-webhook-modal:".length));
       }

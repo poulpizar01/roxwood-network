@@ -12,11 +12,13 @@ import type { WebhookEventType } from "./webhookDispatcher.js";
 /**
  * Cree un nouvel abonnement avec un secret genere aleatoirement, retourne le secret en clair
  * (a n'afficher qu'une seule fois a l'utilisateur — il n'est plus jamais reaffiche ensuite).
+ * `label` n'a de sens que pour les abonnements "custom" (voir le schema) : les evenements
+ * integres du bot sont deja identifies sans ambiguite par leur `eventType`.
  */
-export async function createSubscription(guildId: string, eventType: WebhookEventType, url: string) {
+export async function createSubscription(guildId: string, eventType: WebhookEventType, url: string, label?: string) {
   const secret = randomBytes(32).toString("hex");
   const subscription = await prisma.webhookSubscription.create({
-    data: { guildId, eventType, url, secret },
+    data: { guildId, eventType, url, secret, label },
   });
   return { subscription, secret };
 }
@@ -24,6 +26,11 @@ export async function createSubscription(guildId: string, eventType: WebhookEven
 /** Liste les abonnements d'une guilde. */
 export async function listSubscriptions(guildId: string) {
   return prisma.webhookSubscription.findMany({ where: { guildId }, orderBy: { createdAt: "asc" } });
+}
+
+/** Liste uniquement les abonnements "custom" d'une guilde — utilise pour choisir la cible d'un envoi manuel. */
+export async function listCustomSubscriptions(guildId: string) {
+  return prisma.webhookSubscription.findMany({ where: { guildId, eventType: "custom" }, orderBy: { createdAt: "asc" } });
 }
 
 /** Supprime un abonnement. No-op si l'id n'existe pas ou n'appartient pas a cette guilde. */

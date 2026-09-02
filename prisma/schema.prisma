@@ -168,8 +168,17 @@ model AutoReplyRule {
 model WebhookSubscription {
   id        String   @id @default(cuid())
   guildId   String
-  /// Type d'evenement declencheur (ex: "ticket.created", "ticket.closed").
+  /// Type d'evenement declencheur (ex: "monitoring.shift", "absence.updated"). Les abonnements
+  /// "personnalises" (voir `label`) utilisent tous la valeur fixe "custom" : ils ne sont jamais
+  /// declenches automatiquement par un evenement du bot, seulement envoyes manuellement par le
+  /// staff (voir `dispatchCustomWebhook`), donc pas besoin d'un type dedie par abonnement.
   eventType String
+  /// Libelle libre, utilise uniquement par les abonnements "custom" pour les distinguer entre
+  /// eux (ex: "Ventes formation", "Villas") quand plusieurs pointent vers des recepteurs
+  /// differents (ex: deux Google Sheets distincts) — c'est ce qui permet au staff de choisir
+  /// lequel viser au moment d'envoyer des donnees. `null` pour les abonnements aux evenements
+  /// integres du bot, ou leur `eventType` suffit deja a les identifier.
+  label     String?
   url       String
   /// Secret utilise pour signer le corps de la requete (header X-Signature-256).
   secret    String

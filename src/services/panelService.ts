@@ -6,6 +6,7 @@ import { listActiveWithFields } from "./catalogService.js";
 import { listQuestions } from "./recruitmentQuestionService.js";
 import { listRules } from "./autoReplyService.js";
 import { listSubscriptions } from "./webhookSubscriptionService.js";
+import { describeSubscription } from "./webhookDispatcher.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -447,7 +448,7 @@ export async function buildMonitoringPanelEmbed(guildId: string): Promise<EmbedB
     .join("\n");
 
   const webhooksText = subscriptions.length
-    ? subscriptions.map((s) => `\`${s.eventType}\` → ${s.url.slice(0, 60)} (${s.enabled ? "actif" : "inactif"})`).join("\n")
+    ? subscriptions.map((s) => `\`${describeSubscription(s)}\` → ${s.url.slice(0, 60)} (${s.enabled ? "actif" : "inactif"})`).join("\n")
     : "Aucun webhook configuré.";
 
   return new EmbedBuilder()
@@ -487,7 +488,8 @@ export function buildMonitoringPanelRows(config: { monitoringChannels: { type: M
 
   const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("panel:monitoring:add-webhook").setLabel("Ajouter un webhook").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("panel:monitoring:remove-webhook").setLabel("Retirer un webhook").setStyle(ButtonStyle.Danger)
+    new ButtonBuilder().setCustomId("panel:monitoring:remove-webhook").setLabel("Retirer un webhook").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId("panel:monitoring:send-custom").setLabel("Envoyer des données personnalisées").setStyle(ButtonStyle.Secondary)
   );
 
   return [row1, row2, row3];

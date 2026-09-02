@@ -16,7 +16,8 @@ export type WebhookEventType =
   | "monitoring.invoice"
   | "monitoring.sale"
   | "absence.updated"
-  | "order.updated";
+  | "order.updated"
+  | "custom";
 
 /**
  * Libelle affichable de chaque type d'evenement, et source de verite de la liste complete —
@@ -32,7 +33,35 @@ export const WEBHOOK_EVENT_LABELS: Record<WebhookEventType, string> = {
   "monitoring.sale": "Vente run (Monitoring)",
   "absence.updated": "Absences",
   "order.updated": "Commandes",
+  custom: "Personnalisé (contenu au choix)",
 };
+
+/**
+ * Libelle affichable d'un abonnement dans une liste (embed, menu de suppression...) : le
+ * `label` libre s'il existe (abonnements "custom", potentiellement plusieurs par guilde —
+ * voir le schema), sinon le type d'evenement seul suffit deja a l'identifier.
+ */
+export function describeSubscription(sub: { eventType: string; label: string | null }): string {
+  return sub.label ? `${sub.label} (${sub.eventType})` : sub.eventType;
+}
+
+/**
+ * Convertit un texte libre "cle: valeur" (une paire par ligne, tel que saisi par le staff dans
+ * le modal d'envoi personnalise) en objet — les lignes sans ":" sont ignorees plutot que de
+ * faire echouer tout l'envoi pour une faute de frappe. Volontairement permissif : le contenu
+ * exact reste a la discretion du staff, c'est le recepteur qui decide quoi en faire.
+ */
+export function parseCustomPayload(raw: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const line of raw.split("\n")) {
+    const separatorIndex = line.indexOf(":");
+    if (separatorIndex === -1) continue;
+    const key = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+    if (key) result[key] = value;
+  }
+  return result;
+}
 
 /**
  * Signe le corps de la requete en HMAC-SHA256 avec le secret propre a chaque abonnement,
@@ -40,6 +69,25 @@ export const WEBHOOK_EVENT_LABELS: Record<WebhookEventType, string> = {
  */
 function sign(secret: string, body: string): string {
   return createHmac("sha256", secret).update(body).digest("hex");
+}
+
+/** Signe et envoie un unique POST JSON a un abonnement donne ; logge sans jamais lancer d'exception. */
+async function post(sub: { id: string; url: string; secret: string }, body: string, eventType: string): Promise<void> {
+  try {
+    const response = await fetch(sub.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Signature-256": sign(sub.secret, body),
+      },
+      body,
+    });
+    if (!response.ok) {
+      logger.warn(`Webhook ${sub.id} (${eventType}) a repondu ${response.status}`);
+    }
+  } catch (error) {
+    logger.error(`Echec d'envoi du webhook ${sub.id} (${eventType})`, error);
+  }
 }
 
 /**
@@ -69,23 +117,27 @@ export async function dispatchWebhook(
   // dans la requete ne permettrait de les distinguer.
   const body = JSON.stringify({ guildId, eventType, payload, sentAt: new Date().toISOString() });
 
-  await Promise.all(
-    subscriptions.map(async (sub) => {
-      try {
-        const response = await fetch(sub.url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Signature-256": sign(sub.secret, body),
-          },
-          body,
-        });
-        if (!response.ok) {
-          logger.warn(`Webhook ${sub.id} (${eventType}) a repondu ${response.status}`);
-        }
-      } catch (error) {
-        logger.error(`Echec d'envoi du webhook ${sub.id} (${eventType})`, error);
-      }
-    })
-  );
+  await Promise.all(subscriptions.map((sub) => post(sub, body, eventType)));
+}
+
+/**
+ * Envoie un contenu libre a **un seul** abonnement "custom" choisi explicitement par le staff
+ * (pas de fanout par type — plusieurs abonnements custom d'une meme guilde, ex: un par Google
+ * Sheet, doivent pouvoir recevoir des contenus completement differents sans se marcher dessus).
+ * Retourne `false` sans rien envoyer si l'abonnement n'existe pas/plus ou n'appartient pas a
+ * cette guilde (verification d'isolation, meme raisonnement que `dispatchWebhook`).
+ */
+export async function dispatchCustomWebhook(
+  guildId: string,
+  subscriptionId: string,
+  payload: Record<string, unknown>
+): Promise<boolean> {
+  const sub = await prisma.webhookSubscription.findFirst({
+    where: { id: subscriptionId, guildId, enabled: true },
+  });
+  if (!sub) return false;
+
+  const body = JSON.stringify({ guildId, eventType: sub.eventType, label: sub.label, payload, sentAt: new Date().toISOString() });
+  await post(sub, body, sub.eventType);
+  return true;
 }
