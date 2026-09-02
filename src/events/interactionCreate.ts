@@ -102,13 +102,7 @@ import {
 } from "../services/panelService.js";
 import { createAbsenceRequest, formatFrenchDate, getAbsenceRequest, parseFrenchDate, resolveAbsenceRequest } from "../services/absenceService.js";
 import { postAbsenceRequest, refreshAbsenceMessage } from "../services/absenceLogService.js";
-import {
-  WEBHOOK_EVENT_LABELS,
-  describeSubscription,
-  dispatchCustomWebhook,
-  parseCustomPayload,
-  type WebhookEventType,
-} from "../services/webhookDispatcher.js";
+import { WEBHOOK_EVENT_LABELS, describeSubscription, type WebhookEventType } from "../services/webhookDispatcher.js";
 import { createSubscription, listCustomSubscriptions, listSubscriptions, removeSubscription } from "../services/webhookSubscriptionService.js";
 import { createSheetSync, listSheetSyncs, removeSheetSync } from "../services/sheetSyncService.js";
 import type { MonitoringLogType } from "@prisma/client";
@@ -1892,72 +1886,6 @@ async function handlePanelMonitoringRemoveWebhook(interaction: Interaction): Pro
   await interaction.reply({ components: [row], ephemeral: true });
 }
 
-/** Clic sur "Envoyer des données personnalisées" : choisir vers quel abonnement custom envoyer. */
-async function handlePanelMonitoringSendCustom(interaction: Interaction): Promise<void> {
-  if (!interaction.isButton() || !interaction.guildId) return;
-  if (!isGuildManager(interaction)) {
-    await interaction.reply({ content: NOT_GUILD_MANAGER_MESSAGE, ephemeral: true });
-    return;
-  }
-
-  const subscriptions = await listCustomSubscriptions(interaction.guildId);
-  if (subscriptions.length === 0) {
-    await interaction.reply({
-      content: 'Aucun webhook personnalisé configuré — ajoutez-en un avec "Ajouter un webhook" (type "Personnalisé") avant de pouvoir envoyer des données.',
-      ephemeral: true,
-    });
-    return;
-  }
-
-  const select = new StringSelectMenuBuilder()
-    .setCustomId("panel:monitoring:send-custom-select")
-    .setPlaceholder("Choisir la destination")
-    .addOptions(subscriptions.slice(0, 25).map((s) => ({ label: describeSubscription(s).slice(0, 100), value: s.id })));
-  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
-  await interaction.reply({ components: [row], ephemeral: true });
-}
-
-/** Destination choisie : modal pour le contenu libre (une paire cle/valeur par ligne). */
-async function handleMonitoringSendCustomSelect(interaction: Interaction): Promise<void> {
-  if (!interaction.isStringSelectMenu()) return;
-
-  const subscriptionId = interaction.values[0];
-  const modal = new ModalBuilder()
-    .setCustomId(`panel:monitoring:send-custom-modal:${subscriptionId}`)
-    .setTitle("Envoyer des données");
-  const contentInput = new TextInputBuilder()
-    .setCustomId("content")
-    .setLabel("Contenu (une ligne par « clé: valeur »)")
-    .setPlaceholder("date de vente: 02/09/2026\nnuméro: 42\nformateur: Jean Dupont")
-    .setStyle(TextInputStyle.Paragraph)
-    .setRequired(true);
-  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(contentInput));
-  await interaction.showModal(modal);
-}
-
-/** Soumission du contenu : parse les lignes et envoie a l'abonnement choisi, sans toucher aux autres. */
-async function handleMonitoringSendCustomModal(interaction: Interaction, subscriptionId: string): Promise<void> {
-  if (!interaction.isModalSubmit() || !interaction.guildId) return;
-
-  const raw = interaction.fields.getTextInputValue("content");
-  const data = parseCustomPayload(raw);
-  if (Object.keys(data).length === 0) {
-    await interaction.reply({
-      content: 'Aucune ligne au format "clé: valeur" reconnue — rien n\'a été envoyé.',
-      ephemeral: true,
-    });
-    return;
-  }
-
-  const sent = await dispatchCustomWebhook(interaction.guildId, subscriptionId, data);
-  await interaction.reply({
-    content: sent
-      ? `Données envoyées :\n${Object.entries(data).map(([k, v]) => `**${k}** : ${v}`).join("\n")}`
-      : "Cet abonnement n'existe plus, rien n'a été envoyé.",
-    ephemeral: true,
-  });
-}
-
 async function handleMonitoringRemoveWebhookSelect(interaction: Interaction): Promise<void> {
   if (!interaction.isStringSelectMenu() || !interaction.guildId || !interaction.channelId) return;
 
@@ -2183,7 +2111,6 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       }
       if (interaction.customId === "panel:monitoring:add-webhook") return await handlePanelMonitoringAddWebhook(interaction);
       if (interaction.customId === "panel:monitoring:remove-webhook") return await handlePanelMonitoringRemoveWebhook(interaction);
-      if (interaction.customId === "panel:monitoring:send-custom") return await handlePanelMonitoringSendCustom(interaction);
       if (interaction.customId === "panel:monitoring:sync-sheet") return await handlePanelMonitoringSyncSheet(interaction);
       if (interaction.customId === "panel:monitoring:remove-sync") return await handlePanelMonitoringRemoveSync(interaction);
       return;
@@ -2240,7 +2167,6 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:recruitment:remove-question-select") return await handleRecruitmentRemoveQuestionSelect(interaction);
       if (interaction.customId === "panel:monitoring:add-webhook-type") return await handleMonitoringAddWebhookType(interaction);
       if (interaction.customId === "panel:monitoring:remove-webhook-select") return await handleMonitoringRemoveWebhookSelect(interaction);
-      if (interaction.customId === "panel:monitoring:send-custom-select") return await handleMonitoringSendCustomSelect(interaction);
       if (interaction.customId === "panel:monitoring:sync-sheet-select") return await handleMonitoringSyncSheetSelect(interaction);
       if (interaction.customId === "panel:monitoring:remove-sync-select") return await handleMonitoringRemoveSyncSelect(interaction);
       return;
@@ -2270,9 +2196,6 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:monitoring:set-job-id-modal") return await handleMonitoringSetJobIdModal(interaction);
       if (interaction.customId.startsWith("panel:monitoring:sync-sheet-modal:")) {
         return await handleMonitoringSyncSheetModal(interaction, interaction.customId.slice("panel:monitoring:sync-sheet-modal:".length));
-      }
-      if (interaction.customId.startsWith("panel:monitoring:send-custom-modal:")) {
-        return await handleMonitoringSendCustomModal(interaction, interaction.customId.slice("panel:monitoring:send-custom-modal:".length));
       }
       if (interaction.customId.startsWith("panel:monitoring:add-webhook-modal:")) {
         return await handleMonitoringAddWebhookModal(interaction, interaction.customId.slice("panel:monitoring:add-webhook-modal:".length));

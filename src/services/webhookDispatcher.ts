@@ -46,24 +46,6 @@ export function describeSubscription(sub: { eventType: string; label: string | n
 }
 
 /**
- * Convertit un texte libre "cle: valeur" (une paire par ligne, tel que saisi par le staff dans
- * le modal d'envoi personnalise) en objet — les lignes sans ":" sont ignorees plutot que de
- * faire echouer tout l'envoi pour une faute de frappe. Volontairement permissif : le contenu
- * exact reste a la discretion du staff, c'est le recepteur qui decide quoi en faire.
- */
-export function parseCustomPayload(raw: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const line of raw.split("\n")) {
-    const separatorIndex = line.indexOf(":");
-    if (separatorIndex === -1) continue;
-    const key = line.slice(0, separatorIndex).trim();
-    const value = line.slice(separatorIndex + 1).trim();
-    if (key) result[key] = value;
-  }
-  return result;
-}
-
-/**
  * Signe le corps de la requete en HMAC-SHA256 avec le secret propre a chaque abonnement,
  * pour que le service externe puisse verifier l'authenticite de l'appel (header `X-Signature-256`).
  */

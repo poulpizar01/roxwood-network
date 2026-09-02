@@ -454,8 +454,7 @@ export function buildMonitoringPanelRows(config: { monitoringChannels: { type: M
 
   const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("panel:monitoring:add-webhook").setLabel("Ajouter un webhook").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("panel:monitoring:remove-webhook").setLabel("Retirer un webhook").setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId("panel:monitoring:send-custom").setLabel("Envoyer des données personnalisées").setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId("panel:monitoring:remove-webhook").setLabel("Retirer un webhook").setStyle(ButtonStyle.Danger)
   );
 
   const row4 = new ActionRowBuilder<ButtonBuilder>().addComponents(
