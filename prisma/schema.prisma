@@ -76,7 +76,6 @@ model GuildConfig {
   updatedAt         DateTime @updatedAt
 
   tickets              Ticket[]
-  autoReplyRules       AutoReplyRule[]
   webhooks             WebhookSubscription[]
   ticketCategories     TicketCategoryConfig[]
   catalogItems         CatalogItem[]
@@ -115,9 +114,6 @@ enum TicketType {
   RECRUITMENT
   /// Commande : catalogue + composition self-service par le client (voir ServiceOrder).
   SERVICE
-  /// Question generale : reponse automatique par mot-cle (voir AutoReplyRule), pas de modele
-  /// dedie — juste un scope pour ne declencher `findAutoReply` que dans ce type de ticket.
-  FAQ
 }
 
 /// Un ticket suivi (canal Discord cree par Ticket Tool dans une categorie mappee).
@@ -145,23 +141,6 @@ model Ticket {
 
   @@index([guildId, status])
   @@index([guildId, type])
-}
-
-/// Regle de reponse automatique par mot-cle (`/autoreply`), declenchee sur les messages
-/// du client ouvrant le ticket.
-model AutoReplyRule {
-  id        String   @id @default(cuid())
-  guildId   String
-  /// Mot-cle recherche (comparaison insensible a la casse, sous-chaine).
-  trigger   String
-  /// Reponse envoyee telle quelle quand le trigger matche.
-  response  String
-  enabled   Boolean  @default(true)
-  createdAt DateTime @default(now())
-
-  guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
-
-  @@index([guildId, enabled])
 }
 
 /// Abonnement d'une URL externe (CRM, site...) a un type d'evenement de ticket. Point de
@@ -475,7 +454,6 @@ enum PanelMessageKey {
   SERVICE
   RECRUITMENT
   ABSENCES
-  FAQ
   MONITORING
 }
 

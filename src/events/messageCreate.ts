@@ -1,7 +1,6 @@
 import type { Message } from "discord.js";
 import { getGuildConfig, isTicketManager } from "../services/guildConfigService.js";
 import { getTicketByChannel, recordFirstStaffReply } from "../services/ticketService.js";
-import { findAutoReply } from "../services/autoReplyService.js";
 import { addAttachment } from "../services/recruitmentService.js";
 import { refreshRecruitmentLogMessage } from "../services/recruitmentLogService.js";
 import { ingestMonitoringMessage } from "../services/monitoringService.js";
@@ -22,9 +21,7 @@ import { logger } from "../utils/logger.js";
  *    le seul moyen reel de fermer un ticket cote Ticket Tool et doit rester accessible au staff ;
  * 2. detecter la premiere reponse d'un membre du staff ;
  * 3. sur un ticket de recrutement, rattacher les pieces jointes envoyees par le candidat
- *    a sa candidature (les modals Discord ne supportent pas l'upload de fichier) ;
- * 4. sur un ticket FAQ, si l'auteur est le client ayant ouvert le ticket, tenter une reponse
- *    automatique (mot-cle -> reponse, voir panneau "Tickets" -> "FAQ").
+ *    a sa candidature (les modals Discord ne supportent pas l'upload de fichier).
  * Ignore les messages hors guilde (DMs).
  */
 export async function onMessageCreate(message: Message): Promise<void> {
@@ -53,8 +50,8 @@ export async function onMessageCreate(message: Message): Promise<void> {
     return;
   }
 
-  // Seul l'auteur du ticket declenche les reponses automatiques (pas n'importe quel
-  // visiteur du salon) ; si l'opener n'a pas pu etre determine, on laisse passer par prudence.
+  // Seule la piece jointe du client declenche le rattachement (pas n'importe quel visiteur
+  // du salon) ; si l'opener n'a pas pu etre determine, on laisse passer par prudence.
   if (ticket.openerId && message.author.id !== ticket.openerId) return;
 
   if (ticket.type === "RECRUITMENT" && message.attachments.size > 0) {
@@ -66,16 +63,5 @@ export async function onMessageCreate(message: Message): Promise<void> {
     } catch (error) {
       logger.error(`Erreur enregistrement piece jointe pour le ticket ${ticket.id}`, error);
     }
-  }
-
-  if (ticket.type !== "FAQ") return;
-
-  try {
-    const reply = await findAutoReply(message.guildId, message.content);
-    if (reply) {
-      await message.reply(reply);
-    }
-  } catch (error) {
-    logger.error(`Erreur reponse automatique dans ${message.channelId}`, error);
   }
 }
