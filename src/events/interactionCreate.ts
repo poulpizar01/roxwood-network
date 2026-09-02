@@ -112,6 +112,7 @@ import {
   type WebhookEventType,
 } from "../services/webhookDispatcher.js";
 import { createSubscription, listCustomSubscriptions, listSubscriptions, removeSubscription } from "../services/webhookSubscriptionService.js";
+import { createSheetSync, listSheetSyncs, removeSheetSync } from "../services/sheetSyncService.js";
 import type { MonitoringLogType } from "@prisma/client";
 import { logger } from "../utils/logger.js";
 import { buildImageAttachment } from "../utils/imageAttachment.js";
@@ -2063,6 +2064,114 @@ async function handleMonitoringRemoveWebhookSelect(interaction: Interaction): Pr
 }
 
 /**
+ * Clic sur "Synchroniser un Google Sheet" : choisir vers quel abonnement custom lier le Sheet
+ * (un abonnement n'a au plus qu'une seule synchronisation active — ceux deja lies sont exclus).
+ */
+async function handlePanelMonitoringSyncSheet(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId) return;
+  if (!isGuildManager(interaction)) {
+    await interaction.reply({ content: NOT_GUILD_MANAGER_MESSAGE, ephemeral: true });
+    return;
+  }
+
+  const [customSubs, existingSyncs] = await Promise.all([
+    listCustomSubscriptions(interaction.guildId),
+    listSheetSyncs(interaction.guildId),
+  ]);
+  const alreadyLinked = new Set(existingSyncs.map((s) => s.subscriptionId));
+  const available = customSubs.filter((s) => !alreadyLinked.has(s.id));
+
+  if (available.length === 0) {
+    await interaction.reply({
+      content:
+        customSubs.length === 0
+          ? 'Aucun webhook personnalisé configuré — ajoutez-en un avec "Ajouter un webhook" (type "Personnalisé") avant de lier un Google Sheet.'
+          : "Tous les webhooks personnalisés existants ont déjà une synchronisation active.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("panel:monitoring:sync-sheet-select")
+    .setPlaceholder("Choisir la destination")
+    .addOptions(available.slice(0, 25).map((s) => ({ label: describeSubscription(s).slice(0, 100), value: s.id })));
+  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+  await interaction.reply({ components: [row], ephemeral: true });
+}
+
+/** Destination choisie : modal pour le lien du Google Sheet. */
+async function handleMonitoringSyncSheetSelect(interaction: Interaction): Promise<void> {
+  if (!interaction.isStringSelectMenu()) return;
+
+  const subscriptionId = interaction.values[0];
+  const modal = new ModalBuilder().setCustomId(`panel:monitoring:sync-sheet-modal:${subscriptionId}`).setTitle("Synchroniser un Google Sheet");
+  const urlInput = new TextInputBuilder()
+    .setCustomId("sheetUrl")
+    .setLabel("Lien du Google Sheet")
+    .setPlaceholder("Doit être partagé « Lecture » pour « Toute personne avec le lien »")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(urlInput));
+  await interaction.showModal(modal);
+}
+
+/**
+ * Soumission du lien : cree la synchronisation (lit le Sheet une premiere fois pour fixer le
+ * point de depart — l'historique deja present n'est jamais renvoye, seulement ce qui s'ajoute
+ * a partir de maintenant). Erreur relayee telle quelle si le Sheet n'est pas lisible.
+ */
+async function handleMonitoringSyncSheetModal(interaction: Interaction, subscriptionId: string): Promise<void> {
+  if (!interaction.isModalSubmit() || !interaction.guildId || !interaction.channelId) return;
+
+  const sheetUrl = interaction.fields.getTextInputValue("sheetUrl").trim();
+  try {
+    const sync = await createSheetSync(interaction.guildId, subscriptionId, sheetUrl);
+    await refreshMonitoringPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+    await interaction.reply({
+      content: `Synchronisation activée — le Sheet est lu toutes les 5 minutes, seules les nouvelles lignes seront envoyées (${sync.lastRowCount} ligne(s) déjà présente(s) ignorée(s)).`,
+      ephemeral: true,
+    });
+  } catch (error) {
+    logger.error(`Echec de creation de synchronisation Sheet pour la guilde ${interaction.guildId}`, error);
+    await interaction.reply({
+      content: error instanceof Error ? error.message : "Impossible de lire ce Google Sheet.",
+      ephemeral: true,
+    });
+  }
+}
+
+/** Clic sur "Retirer une synchronisation" : menu natif des synchronisations existantes. */
+async function handlePanelMonitoringRemoveSync(interaction: Interaction): Promise<void> {
+  if (!interaction.isButton() || !interaction.guildId) return;
+  if (!isGuildManager(interaction)) {
+    await interaction.reply({ content: NOT_GUILD_MANAGER_MESSAGE, ephemeral: true });
+    return;
+  }
+
+  const syncs = await listSheetSyncs(interaction.guildId);
+  if (syncs.length === 0) {
+    await interaction.reply({ content: "Aucune synchronisation configurée.", ephemeral: true });
+    return;
+  }
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId("panel:monitoring:remove-sync-select")
+    .setPlaceholder("Choisir une synchronisation à retirer")
+    .addOptions(syncs.slice(0, 25).map((s) => ({ label: describeSubscription(s.subscription).slice(0, 100), value: s.id })));
+  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+  await interaction.reply({ components: [row], ephemeral: true });
+}
+
+async function handleMonitoringRemoveSyncSelect(interaction: Interaction): Promise<void> {
+  if (!interaction.isStringSelectMenu() || !interaction.guildId || !interaction.channelId) return;
+
+  await removeSheetSync(interaction.guildId, interaction.values[0]);
+  await refreshMonitoringPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
+  await interaction.update({ content: "Synchronisation retirée.", components: [] });
+}
+
+/**
  * Handler de l'evenement `interactionCreate`. Aiguille par type d'interaction puis par
  * `customId` vers le handler correspondant ci-dessus. Les customId parametres (contenant
  * un id de ticket, de catalogue ou de categorie) utilisent un prefixe fixe suivi de `:<id>`,
@@ -2177,6 +2286,8 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:monitoring:add-webhook") return await handlePanelMonitoringAddWebhook(interaction);
       if (interaction.customId === "panel:monitoring:remove-webhook") return await handlePanelMonitoringRemoveWebhook(interaction);
       if (interaction.customId === "panel:monitoring:send-custom") return await handlePanelMonitoringSendCustom(interaction);
+      if (interaction.customId === "panel:monitoring:sync-sheet") return await handlePanelMonitoringSyncSheet(interaction);
+      if (interaction.customId === "panel:monitoring:remove-sync") return await handlePanelMonitoringRemoveSync(interaction);
       return;
     }
 
@@ -2234,6 +2345,8 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       if (interaction.customId === "panel:monitoring:add-webhook-type") return await handleMonitoringAddWebhookType(interaction);
       if (interaction.customId === "panel:monitoring:remove-webhook-select") return await handleMonitoringRemoveWebhookSelect(interaction);
       if (interaction.customId === "panel:monitoring:send-custom-select") return await handleMonitoringSendCustomSelect(interaction);
+      if (interaction.customId === "panel:monitoring:sync-sheet-select") return await handleMonitoringSyncSheetSelect(interaction);
+      if (interaction.customId === "panel:monitoring:remove-sync-select") return await handleMonitoringRemoveSyncSelect(interaction);
       return;
     }
 
@@ -2260,6 +2373,9 @@ export async function onInteractionCreate(interaction: Interaction): Promise<voi
       }
       if (interaction.customId === "panel:faq:add-rule-modal") return await handleFaqAddRuleModal(interaction);
       if (interaction.customId === "panel:monitoring:set-job-id-modal") return await handleMonitoringSetJobIdModal(interaction);
+      if (interaction.customId.startsWith("panel:monitoring:sync-sheet-modal:")) {
+        return await handleMonitoringSyncSheetModal(interaction, interaction.customId.slice("panel:monitoring:sync-sheet-modal:".length));
+      }
       if (interaction.customId.startsWith("panel:monitoring:send-custom-modal:")) {
         return await handleMonitoringSendCustomModal(interaction, interaction.customId.slice("panel:monitoring:send-custom-modal:".length));
       }

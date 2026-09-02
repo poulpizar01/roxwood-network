@@ -7,6 +7,7 @@ import { listQuestions } from "./recruitmentQuestionService.js";
 import { listRules } from "./autoReplyService.js";
 import { listSubscriptions } from "./webhookSubscriptionService.js";
 import { describeSubscription } from "./webhookDispatcher.js";
+import { listSheetSyncs } from "./sheetSyncService.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -439,6 +440,7 @@ export const MONITORING_TYPE_LABELS: Record<MonitoringLogType, string> = {
 export async function buildMonitoringPanelEmbed(guildId: string): Promise<EmbedBuilder> {
   const config = await getGuildConfig(guildId);
   const subscriptions = await listSubscriptions(guildId);
+  const sheetSyncs = await listSheetSyncs(guildId);
 
   const channelsText = (Object.keys(MONITORING_TYPE_LABELS) as MonitoringLogType[])
     .map((type) => {
@@ -451,7 +453,7 @@ export async function buildMonitoringPanelEmbed(guildId: string): Promise<EmbedB
     ? subscriptions.map((s) => `\`${describeSubscription(s)}\` → ${s.url.slice(0, 60)} (${s.enabled ? "actif" : "inactif"})`).join("\n")
     : "Aucun webhook configuré.";
 
-  return new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setTitle("Monitoring")
     .setColor(0x5865f2)
     .addFields(
@@ -460,6 +462,15 @@ export async function buildMonitoringPanelEmbed(guildId: string): Promise<EmbedB
       { name: "Salons surveillés", value: channelsText },
       { name: "Webhooks sortants", value: webhooksText }
     );
+
+  if (sheetSyncs.length > 0) {
+    embed.addFields({
+      name: "Google Sheets synchronisés",
+      value: sheetSyncs.map((s) => `${describeSubscription(s.subscription)} — ${s.lastRowCount} ligne(s) envoyée(s)`).join("\n"),
+    });
+  }
+
+  return embed;
 }
 
 /**
@@ -492,7 +503,12 @@ export function buildMonitoringPanelRows(config: { monitoringChannels: { type: M
     new ButtonBuilder().setCustomId("panel:monitoring:send-custom").setLabel("Envoyer des données personnalisées").setStyle(ButtonStyle.Secondary)
   );
 
-  return [row1, row2, row3];
+  const row4 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("panel:monitoring:sync-sheet").setLabel("Synchroniser un Google Sheet").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("panel:monitoring:remove-sync").setLabel("Retirer une synchronisation").setStyle(ButtonStyle.Danger)
+  );
+
+  return [row1, row2, row3, row4];
 }
 
 /**

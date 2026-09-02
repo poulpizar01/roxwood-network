@@ -86,6 +86,7 @@ model GuildConfig {
   monitoringChannels   MonitoringChannelConfig[]
   monitoringEvents     MonitoringEvent[]
   monitoringSafes      MonitoringSafe[]
+  sheetSyncs           SheetSync[]
 }
 
 /// Associe une categorie Discord a un type de ticket ET a ses roles de gestion. Une categorie
@@ -169,9 +170,10 @@ model WebhookSubscription {
   id        String   @id @default(cuid())
   guildId   String
   /// Type d'evenement declencheur (ex: "monitoring.shift", "absence.updated"). Les abonnements
-  /// "personnalises" (voir `label`) utilisent tous la valeur fixe "custom" : ils ne sont jamais
-  /// declenches automatiquement par un evenement du bot, seulement envoyes manuellement par le
-  /// staff (voir `dispatchCustomWebhook`), donc pas besoin d'un type dedie par abonnement.
+  /// "personnalises" (voir `label`) utilisent tous la valeur fixe "custom" : jamais declenches
+  /// par un evenement integre du bot, seulement envoyes a la demande du staff
+  /// (`dispatchCustomWebhook`) ou automatiquement par une synchronisation de Google Sheet
+  /// liee (voir `SheetSync`), donc pas besoin d'un type dedie par abonnement.
   eventType String
   /// Libelle libre, utilise uniquement par les abonnements "custom" pour les distinguer entre
   /// eux (ex: "Ventes formation", "Villas") quand plusieurs pointent vers des recepteurs
@@ -186,8 +188,38 @@ model WebhookSubscription {
   createdAt DateTime @default(now())
 
   guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
+  sheetSync   SheetSync?
 
   @@index([guildId, eventType, enabled])
+}
+
+/// Synchronisation reguliere d'un Google Sheet vers un abonnement webhook "custom" existant :
+/// le bot sonde periodiquement l'export CSV public du Sheet (voir `sheetSyncService.ts`) et
+/// transmet chaque nouvelle ligne (celles au-dela de `lastRowCount`) a l'abonnement cible, sans
+/// connaitre ni imposer de schema — la premiere ligne du Sheet sert d'en-tetes, chaque ligne
+/// suivante devient un objet cle/valeur. Choix explicite de l'utilisateur : lecture via export
+/// CSV public (le Sheet doit etre partage "lecture pour toute personne avec le lien") plutot
+/// qu'un compte de service Google, pour ne demander aucun identifiant a stocker cote VPS.
+model SheetSync {
+  id             String   @id @default(cuid())
+  guildId        String
+  /// URL d'export CSV normalisee (ex: https://docs.google.com/spreadsheets/d/<id>/export?format=csv&gid=<gid>) —
+  /// convertie depuis un lien de partage classique au moment de la creation (voir `parseGoogleSheetUrl`).
+  sheetUrl       String
+  /// Abonnement webhook "custom" cible (URL/secret de destination) — chaque abonnement custom
+  /// n'a au plus qu'une seule synchronisation active (relation 1:1).
+  subscriptionId String                @unique
+  /// Nombre de lignes de donnees deja envoyees (hors ligne d'en-tetes), pour ne transmettre au
+  /// prochain sondage que celles ajoutees depuis. Initialise au nombre de lignes deja presentes
+  /// au moment de la creation — on ne renvoie jamais l'historique existant du Sheet.
+  lastRowCount   Int      @default(0)
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  guildConfig  GuildConfig         @relation(fields: [guildId], references: [guildId])
+  subscription WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, enabled])
 }
 
 enum TicketStatus {

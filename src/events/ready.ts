@@ -3,6 +3,7 @@ import { env } from "../config/env.js";
 import { commands } from "../commands/index.js";
 import { refreshAllPanelsAcrossGuilds } from "../services/panelService.js";
 import { refreshAllRecruitmentStatusMessages } from "../services/recruitmentLogService.js";
+import { startSheetSyncPolling } from "../services/sheetSyncService.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -50,4 +51,7 @@ export async function onReady(readyClient: Client<true>): Promise<void> {
   } catch (error) {
     logger.error("Echec du rafraichissement du message de statut recrutement au demarrage", error);
   }
+
+  startSheetSyncPolling();
+  logger.info("Sondage des synchronisations Google Sheets demarre");
 }
