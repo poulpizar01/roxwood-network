@@ -1948,27 +1948,26 @@ async function handleMonitoringSyncSheetSelect(interaction: Interaction): Promis
 }
 
 /**
- * Soumission du lien : cree la synchronisation (lit le Sheet une premiere fois pour fixer le
- * point de depart — l'historique deja present n'est jamais renvoye, seulement ce qui s'ajoute
- * a partir de maintenant). Erreur relayee telle quelle si le Sheet n'est pas lisible.
+ * Soumission du lien : cree la synchronisation, ce qui envoie immediatement tout l'historique
+ * deja present dans le Sheet (voir `createSheetSync`) — potentiellement plusieurs appels HTTP
+ * sequentiels vers le recepteur externe, donc `deferReply` : ca peut largement depasser le
+ * delai de 3s avant lequel Discord attend une premiere reponse a l'interaction. Erreur relayee
+ * telle quelle si le Sheet n'est pas lisible.
  */
 async function handleMonitoringSyncSheetModal(interaction: Interaction, subscriptionId: string): Promise<void> {
   if (!interaction.isModalSubmit() || !interaction.guildId || !interaction.channelId) return;
 
   const sheetUrl = interaction.fields.getTextInputValue("sheetUrl").trim();
+  await interaction.deferReply({ ephemeral: true });
   try {
     const sync = await createSheetSync(interaction.guildId, subscriptionId, sheetUrl);
     await refreshMonitoringPanelMessage(interaction.client, interaction.guildId, interaction.channelId);
-    await interaction.reply({
-      content: `Synchronisation activée — le Sheet est lu toutes les 5 minutes, seules les nouvelles lignes seront envoyées (${sync.lastRowCount} ligne(s) déjà présente(s) ignorée(s)).`,
-      ephemeral: true,
-    });
+    await interaction.editReply(
+      `Synchronisation activée — ${sync.lastRowCount} ligne(s) déjà présente(s) envoyée(s) immédiatement, puis seules les nouvelles lignes seront envoyées (sondage toutes les 5 minutes).`
+    );
   } catch (error) {
     logger.error(`Echec de creation de synchronisation Sheet pour la guilde ${interaction.guildId}`, error);
-    await interaction.reply({
-      content: error instanceof Error ? error.message : "Impossible de lire ce Google Sheet.",
-      ephemeral: true,
-    });
+    await interaction.editReply(error instanceof Error ? error.message : "Impossible de lire ce Google Sheet.");
   }
 }
 
