@@ -104,15 +104,31 @@ export async function fetchSheetRows(csvUrl: string): Promise<string[][]> {
 }
 
 /**
- * Cree une synchronisation, initialisee au nombre de lignes deja presentes dans le Sheet au
- * moment de la creation (premiere ligne = en-tetes, exclue du compte) — on ne renvoie jamais
- * l'historique deja present, seulement ce qui est ajoute a partir de maintenant.
+ * Cree une synchronisation et envoie immediatement tout l'historique deja present dans le
+ * Sheet (une ligne = un envoi, meme format que le sondage periodique) — a la demande explicite
+ * de l'utilisateur : au moment ou on branche un Sheet, on veut que le recepteur reparte avec
+ * toutes les donnees deja saisies, pas seulement celles qui arriveront apres coup. Le compteur
+ * `lastRowCount` n'est mis a jour qu'une fois cet envoi initial termine, pour que le sondage
+ * periodique ne renvoie pas ces memes lignes une seconde fois.
  */
 export async function createSheetSync(guildId: string, subscriptionId: string, rawSheetUrl: string) {
   const sheetUrl = parseGoogleSheetUrl(rawSheetUrl);
   const rows = await fetchSheetRows(sheetUrl);
-  const lastRowCount = Math.max(0, rows.length - 1);
-  return prisma.sheetSync.create({ data: { guildId, subscriptionId, sheetUrl, lastRowCount } });
+  const sync = await prisma.sheetSync.create({ data: { guildId, subscriptionId, sheetUrl, lastRowCount: 0 } });
+
+  if (rows.length > 1) {
+    const [headers, ...dataRows] = rows;
+    for (const rowValues of dataRows) {
+      const payload: Record<string, string> = {};
+      headers.forEach((header, index) => {
+        if (header) payload[header] = rowValues[index] ?? "";
+      });
+      await dispatchCustomWebhook(guildId, subscriptionId, payload);
+    }
+    await prisma.sheetSync.update({ where: { id: sync.id }, data: { lastRowCount: dataRows.length } });
+  }
+
+  return sync;
 }
 
 /** Liste les synchronisations d'une guilde, avec l'abonnement cible (pour afficher son libelle). */
