@@ -60,11 +60,13 @@ export async function saveLogMessageRef(ticketId: string, logChannelId: string, 
 /**
  * Rattache une piece jointe (image, document) envoyee par le candidat en message classique
  * dans le salon du ticket — les modals Discord ne supportent pas l'upload de fichier, c'est
- * donc le seul moyen technique de joindre des fichiers a une candidature.
+ * donc le seul moyen technique de joindre des fichiers a une candidature. Les octets (deja
+ * telecharges par l'appelant depuis l'URL CDN Discord, voir `messageCreate.ts`) sont stockes
+ * directement plutot que cette URL, qui est signee et expire.
  */
-export async function addAttachment(ticketId: string, url: string, filename: string) {
+export async function addAttachment(ticketId: string, data: Buffer, filename: string) {
   const application = await prisma.recruitmentApplication.findUniqueOrThrow({ where: { ticketId } });
-  return prisma.recruitmentAttachment.create({ data: { applicationId: application.id, url, filename } });
+  return prisma.recruitmentAttachment.create({ data: { applicationId: application.id, data, filename } });
 }
 
 /** Recupere la candidature d'un ticket avec ses reponses et pieces jointes, ou `null` si aucune n'existe. */

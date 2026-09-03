@@ -57,7 +57,12 @@ export async function onMessageCreate(message: Message): Promise<void> {
   if (ticket.type === "RECRUITMENT" && message.attachments.size > 0) {
     try {
       for (const attachment of message.attachments.values()) {
-        await addAttachment(ticket.id, attachment.url, attachment.name ?? "fichier");
+        // On telecharge les octets pour les posseder (voir `RecruitmentAttachment.data`)
+        // plutot que de garder l'URL CDN Discord de l'attachment, qui est signee et expire —
+        // meme raisonnement que pour les photos de catalogue et la banniere de facture.
+        const response = await fetch(attachment.url);
+        const data = Buffer.from(await response.arrayBuffer());
+        await addAttachment(ticket.id, data, attachment.name ?? "fichier");
       }
       await refreshRecruitmentLogMessage(message.client, ticket.id);
     } catch (error) {

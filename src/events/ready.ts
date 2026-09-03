@@ -4,6 +4,7 @@ import { commands } from "../commands/index.js";
 import { refreshAllPanelsAcrossGuilds } from "../services/panelService.js";
 import { refreshAllRecruitmentStatusMessages } from "../services/recruitmentLogService.js";
 import { startSheetSyncPolling } from "../services/sheetSyncService.js";
+import { startWebhookRetryPolling } from "../services/webhookDispatcher.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -54,4 +55,7 @@ export async function onReady(readyClient: Client<true>): Promise<void> {
 
   startSheetSyncPolling();
   logger.info("Sondage des synchronisations Google Sheets demarre");
+
+  startWebhookRetryPolling();
+  logger.info("Sondage des livraisons webhook a reessayer demarre");
 }

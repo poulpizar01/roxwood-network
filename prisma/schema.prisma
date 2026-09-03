@@ -10,33 +10,33 @@ datasource db {
 /// Configuration du bot pour un serveur Discord donne (une ligne par guilde, isolation
 /// multi-serveur : toutes les autres tables referencent `guildId` et sont filtrees dessus).
 model GuildConfig {
-  id                String   @id @default(cuid())
+  id                            String   @id @default(cuid())
   /// Id de la guilde Discord, cle metier utilisee partout ailleurs dans le code (pas `id`).
-  guildId           String   @unique
+  guildId                       String   @unique
   /// Salon dedie ou sont postes les recaps de candidature (avec boutons Statut/S'assigner),
   /// pour que le suivi reste visible par le staff sans polluer le salon du ticket (partage
   /// avec le candidat). `null` = pas configure, le recap est poste dans le salon du ticket.
-  recruitmentLogChannelId String?
+  recruitmentLogChannelId       String?
   /// Si `false`, les nouveaux tickets RECRUITMENT reçoivent un message "recrutements fermés"
   /// au lieu du bouton de formulaire. N'affecte pas les candidatures deja en cours.
-  recruitmentOpen   Boolean  @default(true)
+  recruitmentOpen               Boolean  @default(true)
   /// Salon designe pour heberger les messages permanents du panneau d'administration
   /// (voir PanelMessage). Un seul salon par guilde.
-  panelChannelId    String?
+  panelChannelId                String?
   /// Roles autorises a accepter/refuser une demande d'absence (boutons du message de suivi
   /// dans `absenceReviewChannelId`). Plusieurs roles possibles (ex: plusieurs paliers de
   /// management). Vide = personne configure, le bouton "Declarer une absence" reste desactive.
-  absenceApproverRoleIds String[] @default([])
+  absenceApproverRoleIds        String[] @default([])
   /// Salon dedie ou sont postees les demandes d'absence pour validation staff — separe du
   /// salon panneau, meme logique que `recruitmentLogChannelId`. `null` = pas configure.
-  absenceReviewChannelId String?
+  absenceReviewChannelId        String?
   /// jobId (cote script FiveM) sur lequel porte le monitoring de cette guilde. Les logs
   /// d'autres entreprises passant par les memes salons webhook (serveur FiveM partage entre
   /// plusieurs entreprises/Discords) sont completement ignores. `null` = monitoring pas
   /// configure, aucun log traite.
-  monitoringJobId String?
+  monitoringJobId               String?
   /// Role Discord ajoute a la prise de service, retire a la fin de service.
-  onDutyRoleId    String?
+  onDutyRoleId                  String?
   /// Categorie Discord vers laquelle deplacer le salon d'un ticket RECRUITMENT quand sa
   /// candidature passe a ACCEPTED (manuellement via le bouton Statut, ou automatiquement via
   /// le log monitoring RECRUITMENT "embauche"). `null` = pas de deplacement automatique.
@@ -48,32 +48,32 @@ model GuildConfig {
   /// place a chaque bascule) — distinct de `recruitmentLogChannelId` (suivi des candidatures
   /// individuelles, reserve au staff) : celui-ci peut etre rendu visible a tout le monde.
   /// `null` = pas de message de statut public.
-  recruitmentStatusChannelId String?
+  recruitmentStatusChannelId    String?
   /// Id du message de statut recrutement, pour l'editer en place plutot que le reposter a
   /// chaque bascule. `null` tant que jamais poste.
-  recruitmentStatusMessageId String?
+  recruitmentStatusMessageId    String?
   /// RIB affiche sur les factures pour le reglement (coordonnees bancaires in-game).
-  shopRib String?
+  shopRib                       String?
   /// Numero de telephone de la boutique, affiche en pied de facture.
-  shopPhone String?
+  shopPhone                     String?
   /// Octets bruts de la banniere affichee en bas de chaque facture — meme raisonnement que
   /// `CatalogItem.imageData` : stockee en base plutot qu'une URL Discord, pour pouvoir
   /// supprimer le message d'upload sans casser l'image.
-  shopBannerData     Bytes?
+  shopBannerData                Bytes?
   /// Nom de fichier associe a `shopBannerData`, requis par l'API Discord pour le re-upload.
-  shopBannerFilename String?
+  shopBannerFilename            String?
   /// Message de remerciement affiche en pied de facture (ex: "X vous remercie pour votre confiance").
-  shopThankYouMessage String?
+  shopThankYouMessage           String?
   /// Capacite d'un camion en grammes, utilisee pour calculer le nombre de camions requis a
   /// partir du poids total d'une commande (voir `CatalogItem.weightGrams`). `null` = "camions
   /// requis" jamais affiche sur la facture, meme si des articles ont un poids configure.
-  truckCapacityGrams Int?
+  truckCapacityGrams            Int?
   /// Dernier numero de facture attribue pour cette guilde (compteur sequentiel par entreprise,
   /// incremente atomiquement a chaque nouvelle facture — voir `orderService.setInvoiceNumber`).
   /// Le numero affiche est cet entier converti en chaine, sans prefixe ni lettre.
-  lastInvoiceNumber Int      @default(0)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  lastInvoiceNumber             Int      @default(0)
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
 
   tickets              Ticket[]
   webhooks             WebhookSubscription[]
@@ -120,22 +120,22 @@ enum TicketType {
 /// Porte les champs generiques communs aux deux types ; les details specifiques vivent
 /// dans `application` (RECRUITMENT) ou `order` (SERVICE), en relation 1:1 optionnelle.
 model Ticket {
-  id                String         @id @default(cuid())
+  id                String       @id @default(cuid())
   guildId           String
   /// Id du canal Discord, cle utilisee par la quasi-totalite du code pour retrouver un ticket.
-  channelId         String         @unique
+  channelId         String       @unique
   categoryId        String
   type              TicketType
   /// Utilisateur ayant ouvert le ticket, devine via les permission overwrites du canal
   /// (best-effort : peut etre `null` si non determinable).
   openerId          String?
-  status            TicketStatus   @default(OPEN)
-  createdAt         DateTime       @default(now())
+  status            TicketStatus @default(OPEN)
+  createdAt         DateTime     @default(now())
   closedAt          DateTime?
   /// Renseigne a la 1ere reponse d'un membre du staff (base du calcul de temps de reponse moyen, voir /stats).
   firstStaffReplyAt DateTime?
 
-  guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
+  guildConfig GuildConfig             @relation(fields: [guildId], references: [guildId])
   application RecruitmentApplication?
   order       ServiceOrder?
 
@@ -166,10 +166,33 @@ model WebhookSubscription {
   enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
 
-  guildConfig GuildConfig @relation(fields: [guildId], references: [guildId])
-  sheetSync   SheetSync?
+  guildConfig      GuildConfig              @relation(fields: [guildId], references: [guildId])
+  sheetSync        SheetSync?
+  deliveryAttempts WebhookDeliveryAttempt[]
 
   @@index([guildId, eventType, enabled])
+}
+
+/// Livraison echouee d'un webhook, en attente de nouvelle tentative — evite de perdre un
+/// evenement si le recepteur est injoignable au moment de l'envoi (site en panne, timeout...).
+/// Le corps JSON (`body`) est stocke tel quel pour renvoyer exactement le meme evenement a
+/// chaque essai ; la signature HMAC est recalculee au moment de chaque tentative (voir
+/// `webhookDispatcher.ts`), avec le secret courant de l'abonnement. Supprimee des qu'une
+/// tentative reussit, ou apres `MAX_DELIVERY_ATTEMPTS` echecs — abandon definitif au-dela,
+/// journalise comme perte de donnees.
+model WebhookDeliveryAttempt {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  eventType      String
+  body           String
+  attempts       Int      @default(1)
+  nextAttemptAt  DateTime
+  lastError      String?
+  createdAt      DateTime @default(now())
+
+  subscription WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([nextAttemptAt])
 }
 
 /// Synchronisation reguliere d'un Google Sheet vers un abonnement webhook "custom" existant :
@@ -187,7 +210,7 @@ model SheetSync {
   sheetUrl       String
   /// Abonnement webhook "custom" cible (URL/secret de destination) — chaque abonnement custom
   /// n'a au plus qu'une seule synchronisation active (relation 1:1).
-  subscriptionId String                @unique
+  subscriptionId String   @unique
   /// Nombre de lignes de donnees deja envoyees (hors ligne d'en-tetes), pour ne transmettre au
   /// prochain sondage que celles ajoutees depuis. Initialise au nombre de lignes deja presentes
   /// au moment de la creation — on ne renvoie jamais l'historique existant du Sheet.
@@ -210,13 +233,13 @@ enum TicketStatus {
 /// ticket, remplie ensuite par le formulaire client (`answers`) et pilotee par le staff
 /// (`status`, `recruiterId`).
 model RecruitmentApplication {
-  id          String            @id @default(cuid())
-  ticketId    String            @unique
-  status      ApplicationStatus @default(PENDING)
+  id           String            @id @default(cuid())
+  ticketId     String            @unique
+  status       ApplicationStatus @default(PENDING)
   /// Membre du staff s'etant assigne la candidature (bouton "S'assigner"). `null` = non assignee.
-  recruiterId String?
+  recruiterId  String?
   /// Renseigne quand le candidat soumet le formulaire (peut rester `null` s'il n'a pas encore repondu).
-  submittedAt DateTime?
+  submittedAt  DateTime?
   /// Salon ou vit le message de suivi (recap + boutons Statut/S'assigner) : le salon
   /// `recruitmentLogChannelId` de la guilde au moment de l'envoi, ou le salon du ticket en repli.
   /// Conserve ici (plutot que relu depuis la config) pour retrouver le bon message meme si
@@ -224,10 +247,10 @@ model RecruitmentApplication {
   logChannelId String?
   /// Id du message de suivi, pour pouvoir l'editer en place quand le statut ou le recruteur change.
   logMessageId String?
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
 
-  ticket      Ticket                   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticket      Ticket                  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   answers     RecruitmentAnswer[]
   attachments RecruitmentAttachment[]
 }
@@ -249,9 +272,10 @@ model RecruitmentAnswer {
 model RecruitmentAttachment {
   id            String   @id @default(cuid())
   applicationId String
-  /// URL Discord CDN du fichier (attention : les URLs d'attachment Discord sont signees et
-  /// expirent apres un certain temps — pas une solution d'archivage long terme fiable).
-  url           String
+  /// Octets du fichier, telecharges depuis l'URL Discord CDN au moment de la reception puis
+  /// stockes ici — pas de dependance a une URL Discord CDN, qui est signee et expire (et
+  /// cesse de repondre des que le message d'origine est supprime).
+  data          Bytes
   filename      String
   createdAt     DateTime @default(now())
 
@@ -294,12 +318,12 @@ enum RecruitmentFieldStyle {
 /// champs a remplir par le client (`fields`), pour s'adapter a des produits/services
 /// tres differents (ex: location de salle vs commande de menus).
 model CatalogItem {
-  id          String   @id @default(cuid())
-  guildId     String
-  name        String
-  description String?
+  id            String   @id @default(cuid())
+  guildId       String
+  name          String
+  description   String?
   /// Prix unitaire, en devise in-game (entier, pas de sous-unite/centimes).
-  price       Int
+  price         Int
   /// Octets bruts de la photo de l'article, stockes en base plutot que juste son URL Discord :
   /// l'URL CDN d'un attachment cesse de repondre (404) des que le message qui le porte est
   /// supprime, meme avant l'expiration normale du lien signe (constate en conditions reelles
@@ -311,10 +335,10 @@ model CatalogItem {
   imageFilename String?
   /// Poids unitaire en grammes, optionnel. Si aucun article d'une commande n'a de poids
   /// configure, "poids total"/"camions requis" sont omis de la facture (voir `orderLogService.ts`).
-  weightGrams Int?
+  weightGrams   Int?
   /// Permet de retirer un article du menu deroulant client sans supprimer son historique de commandes.
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
 
   guildConfig GuildConfig        @relation(fields: [guildId], references: [guildId])
   fields      CatalogItemField[]
@@ -351,14 +375,14 @@ enum CatalogFieldStyle {
 /// composee ensuite par le client lui-meme (self-service) via le menu deroulant + formulaires
 /// dynamiques ; le staff ne fait que confirmer le paiement, ce qui declenche la facture.
 model ServiceOrder {
-  id            String        @id @default(cuid())
-  ticketId      String        @unique
+  id                    String        @id @default(cuid())
+  ticketId              String        @unique
   /// Statut logistique (preparation/livraison), independant du statut de paiement.
-  status        OrderStatus   @default(PENDING)
-  paymentStatus PaymentStatus @default(UNPAID)
+  status                OrderStatus   @default(PENDING)
+  paymentStatus         PaymentStatus @default(UNPAID)
   /// Numero de facture, genere (et fige) a la premiere generation de facture. `null` tant
   /// qu'aucune facture n'a jamais ete emise pour cette commande.
-  invoiceNumber String?       @unique
+  invoiceNumber         String?       @unique
   /// Id de l'unique message de commande dans le salon du ticket (recap + boutons), edite en
   /// place a chaque changement (composition, validation, statut, paiement...) plutot que
   /// reposte a chaque fois. Toujours dans le salon du ticket (pas de salon de suivi dedie
@@ -366,17 +390,17 @@ model ServiceOrder {
   confirmationMessageId String?
   /// True une fois que le client a clique "Valider la commande" — determine quel style
   /// d'embed/boutons afficher sur le message de commande (composition vs suivi/facturation).
-  confirmed     Boolean       @default(false)
+  confirmed             Boolean       @default(false)
   /// Frais de livraison factures en plus du sous-total des articles, definis manuellement par
   /// le staff (bouton "Livraison"). 0 = aucun frais.
-  deliveryFee   Int           @default(0)
+  deliveryFee           Int           @default(0)
   /// Reduction accordee, en pourcentage du sous-total (0-100), definie manuellement par le
   /// staff (bouton "Réduction"). 0 = aucune reduction. Le montant deduit est recalcule a
   /// l'affichage (voir `computeGrandTotal`), jamais fige — coherent tant que le sous-total
   /// n'a pas change depuis, mais recalcule si des articles sont ajoutes/retires ensuite.
-  discountPercent Int         @default(0)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  discountPercent       Int           @default(0)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
   ticket Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   items  OrderItem[]

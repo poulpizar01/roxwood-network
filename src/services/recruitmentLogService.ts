@@ -1,8 +1,9 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Client } from "discord.js";
+import { ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Client } from "discord.js";
 import { getApplication } from "./recruitmentService.js";
 import { getTicketById } from "./ticketService.js";
 import { getGuildConfig, setRecruitmentStatusMessageId } from "./guildConfigService.js";
 import { prisma } from "../db/prisma.js";
+import { buildImageAttachment } from "../utils/imageAttachment.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -29,8 +30,16 @@ export function recruitmentStatusLabel(status: string): string {
 
 /**
  * Construit l'embed de suivi d'une candidature (candidat, salon, statut, recruteur,
- * reponses au formulaire, pieces jointes). Reutilise a la fois pour le premier envoi et
- * pour la mise a jour du message apres un changement de statut/assignation/piece jointe.
+ * reponses au formulaire, pieces jointes) et les fichiers Discord a joindre au meme message
+ * pour que les references `attachment://` de l'embed resolvent. Reutilise a la fois pour le
+ * premier envoi et pour la mise a jour du message apres un changement de
+ * statut/assignation/piece jointe.
+ *
+ * Les octets de chaque piece jointe (voir `RecruitmentAttachment.data`) sont re-uploades a
+ * chaque appel plutot que reutiliser une URL Discord anterieure — meme raisonnement que
+ * `buildImageAttachment` : decouple l'affichage de la duree de vie d'un message anterieur.
+ * Chaque nom de fichier est prefixe par son index pour rester unique au sein du message, meme
+ * si deux pieces jointes partagent le meme nom d'origine (ex: deux "photo.jpg").
  */
 export function buildRecruitmentEmbed(
   ticket: { channelId: string; openerId: string | null },
@@ -38,9 +47,9 @@ export function buildRecruitmentEmbed(
     status: string;
     recruiterId: string | null;
     answers: { question: string; answer: string }[];
-    attachments: { url: string; filename: string }[];
+    attachments: { data: Uint8Array; filename: string }[];
   }
-): EmbedBuilder {
+): { embed: EmbedBuilder; files: AttachmentBuilder[] } {
   const embed = new EmbedBuilder()
     .setTitle("Candidature")
     .setColor(0x5865f2)
@@ -52,17 +61,25 @@ export function buildRecruitmentEmbed(
       ...application.answers.map((a) => ({ name: a.question, value: a.answer || "-" }))
     );
 
+  const files: AttachmentBuilder[] = [];
   if (application.attachments.length > 0) {
     embed.addFields({
       name: "Pièces jointes",
-      value: application.attachments.map((a, i) => `[${a.filename || `Fichier ${i + 1}`}](${a.url})`).join("\n"),
+      value: application.attachments.map((a, i) => a.filename || `Fichier ${i + 1}`).join("\n"),
+    });
+
+    let firstImageUrl: string | null = null;
+    application.attachments.forEach((a, i) => {
+      const uniqueName = `${i}-${a.filename || "fichier"}`;
+      const { attachment, url } = buildImageAttachment(Buffer.from(a.data), uniqueName);
+      files.push(attachment);
+      if (!firstImageUrl && /\.(png|jpe?g|gif|webp)$/i.test(a.filename)) firstImageUrl = url;
     });
     // Un embed n'affiche qu'une seule image en grand : on prend la 1ere piece jointe qui en est une.
-    const firstImage = application.attachments.find((a) => /\.(png|jpe?g|gif|webp)($|\?)/i.test(a.url));
-    if (firstImage) embed.setImage(firstImage.url);
+    if (firstImageUrl) embed.setImage(firstImageUrl);
   }
 
-  return embed;
+  return { embed, files };
 }
 
 /** Boutons "Statut" et "S'assigner" affiches sous le message de suivi d'une candidature. */
@@ -117,7 +134,11 @@ export async function refreshRecruitmentLogMessage(client: Client, ticketId: str
     const channel = await client.channels.fetch(application.logChannelId);
     if (!channel?.isTextBased() || channel.isDMBased()) return;
     const message = await channel.messages.fetch(application.logMessageId);
-    await message.edit({ embeds: [buildRecruitmentEmbed(ticket, application)], components: [buildRecruitmentActionRow(ticketId)] });
+    const { embed, files } = buildRecruitmentEmbed(ticket, application);
+    // `attachments: []` efface les pieces jointes precedentes du message avant d'ajouter
+    // `files` : sans ca, discord.js conserve les anciennes en plus des nouvelles a chaque
+    // edition, et le nombre de fichiers doublerait a chaque nouvelle piece jointe candidat.
+    await message.edit({ embeds: [embed], files, attachments: [], components: [buildRecruitmentActionRow(ticketId)] });
   } catch (error) {
     logger.error(`Echec de mise a jour du message de suivi pour le ticket ${ticketId}`, error);
   }

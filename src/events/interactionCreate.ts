@@ -243,8 +243,10 @@ async function handleRecruitmentSubmitForm(interaction: Interaction): Promise<vo
 
   const logChannel = await resolveRecruitmentLogChannel(interaction.client, interaction.guildId, ticket.channelId);
   if (logChannel) {
+    const { embed, files } = buildRecruitmentEmbed(ticket, application);
     const message = await logChannel.send({
-      embeds: [buildRecruitmentEmbed(ticket, application)],
+      embeds: [embed],
+      files,
       components: [buildRecruitmentActionRow(ticket.id)],
     });
     await saveLogMessageRef(ticket.id, logChannel.id, message.id);

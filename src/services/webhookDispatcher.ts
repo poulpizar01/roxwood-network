@@ -53,8 +53,31 @@ function sign(secret: string, body: string): string {
   return createHmac("sha256", secret).update(body).digest("hex");
 }
 
-/** Signe et envoie un unique POST JSON a un abonnement donne ; logge sans jamais lancer d'exception. */
-async function post(sub: { id: string; url: string; secret: string }, body: string, eventType: string): Promise<void> {
+/**
+ * Nombre maximum de tentatives (1 immediate + relances) avant d'abandonner definitivement une
+ * livraison et de perdre l'evenement — au-dela, le recepteur est considere durablement en
+ * panne ou mal configure plutot que temporairement indisponible.
+ */
+const MAX_DELIVERY_ATTEMPTS = 10;
+/** Sonde les livraisons a reessayer toutes les minutes. */
+const RETRY_POLL_INTERVAL_MS = 60 * 1000;
+
+/** Delai avant la Nieme tentative : 1, 2, 4, 8... minutes, plafonne a 30 minutes. */
+function nextAttemptDelayMs(attempts: number): number {
+  const minutes = Math.min(2 ** (attempts - 1), 30);
+  return minutes * 60 * 1000;
+}
+
+type DeliveryResult = { ok: true } | { ok: false; retryable: boolean; error: string };
+
+/**
+ * Signe et tente un unique POST JSON vers un abonnement — ne lance jamais d'exception, le
+ * resultat indique si l'echec (s'il y en a un) vaut la peine d'etre reessaye : une erreur
+ * reseau/timeout ou un 5xx/429 est transitoire (le recepteur peut revenir), alors qu'un 4xx
+ * (401, 404...) signale un probleme de configuration qui redonnera la meme erreur a chaque
+ * essai — inutile de s'acharner dessus pendant des heures.
+ */
+async function attemptDelivery(sub: { id: string; url: string; secret: string }, body: string, eventType: string): Promise<DeliveryResult> {
   try {
     const response = await fetch(sub.url, {
       method: "POST",
@@ -64,12 +87,84 @@ async function post(sub: { id: string; url: string; secret: string }, body: stri
       },
       body,
     });
-    if (!response.ok) {
-      logger.warn(`Webhook ${sub.id} (${eventType}) a repondu ${response.status}`);
-    }
+    if (response.ok) return { ok: true };
+    logger.warn(`Webhook ${sub.id} (${eventType}) a repondu ${response.status}`);
+    const retryable = response.status === 429 || response.status >= 500;
+    return { ok: false, retryable, error: `HTTP ${response.status}` };
   } catch (error) {
     logger.error(`Echec d'envoi du webhook ${sub.id} (${eventType})`, error);
+    return { ok: false, retryable: true, error: error instanceof Error ? error.message : "Erreur reseau" };
   }
+}
+
+/**
+ * Envoie une premiere fois immediatement ; si cet essai echoue pour une raison transitoire,
+ * met la livraison en file pour nouvelle tentative (voir `retryFailedDeliveries`) plutot que
+ * de perdre l'evenement — a la demande explicite de l'utilisateur (risque de perte de donnees
+ * si le site externe est injoignable au moment precis de l'envoi).
+ */
+async function post(sub: { id: string; url: string; secret: string }, body: string, eventType: string): Promise<void> {
+  const result = await attemptDelivery(sub, body, eventType);
+  if (result.ok || !result.retryable) return;
+
+  await prisma.webhookDeliveryAttempt.create({
+    data: {
+      subscriptionId: sub.id,
+      eventType,
+      body,
+      attempts: 1,
+      nextAttemptAt: new Date(Date.now() + nextAttemptDelayMs(1)),
+      lastError: result.error,
+    },
+  });
+}
+
+/**
+ * Reessaie toutes les livraisons arrivees a echeance. Chaque tentative reussie supprime son
+ * enregistrement ; chaque nouvel echec transitoire recale l'echeance suivante ; un echec non
+ * transitoire (4xx) ou le depassement de `MAX_DELIVERY_ATTEMPTS` abandonne definitivement la
+ * livraison (journalise en erreur — c'est une perte de donnees reelle, a distinguer d'un
+ * simple warning). Un abonnement desactive ou supprime entretemps annule aussi ses livraisons
+ * en attente (desactive : verifie ici : supprime : cascade DB automatique).
+ */
+export async function retryFailedDeliveries(): Promise<void> {
+  const due = await prisma.webhookDeliveryAttempt.findMany({
+    where: { nextAttemptAt: { lte: new Date() } },
+    include: { subscription: true },
+  });
+
+  for (const delivery of due) {
+    if (!delivery.subscription.enabled) {
+      await prisma.webhookDeliveryAttempt.delete({ where: { id: delivery.id } });
+      continue;
+    }
+
+    const result = await attemptDelivery(delivery.subscription, delivery.body, delivery.eventType);
+    if (result.ok) {
+      await prisma.webhookDeliveryAttempt.delete({ where: { id: delivery.id } });
+      logger.info(`Webhook ${delivery.subscriptionId} (${delivery.eventType}) livre apres nouvelle tentative (essai ${delivery.attempts + 1})`);
+      continue;
+    }
+
+    const attempts = delivery.attempts + 1;
+    if (!result.retryable || attempts >= MAX_DELIVERY_ATTEMPTS) {
+      await prisma.webhookDeliveryAttempt.delete({ where: { id: delivery.id } });
+      logger.error(`Webhook ${delivery.subscriptionId} (${delivery.eventType}) abandonne definitivement apres ${attempts} tentative(s) — evenement perdu`);
+      continue;
+    }
+
+    await prisma.webhookDeliveryAttempt.update({
+      where: { id: delivery.id },
+      data: { attempts, nextAttemptAt: new Date(Date.now() + nextAttemptDelayMs(attempts)), lastError: result.error },
+    });
+  }
+}
+
+/** Demarre le sondage periodique des livraisons a reessayer — a appeler une seule fois au demarrage du bot (voir `ready.ts`). */
+export function startWebhookRetryPolling(): void {
+  setInterval(() => {
+    retryFailedDeliveries().catch((error) => logger.error("Erreur inattendue lors du sondage des webhooks a reessayer", error));
+  }, RETRY_POLL_INTERVAL_MS);
 }
 
 /**
