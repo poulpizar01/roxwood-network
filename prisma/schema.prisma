@@ -148,7 +148,7 @@ model Ticket {
 model WebhookSubscription {
   id        String   @id @default(cuid())
   guildId   String
-  /// Type d'evenement declencheur (ex: "monitoring.shift", "absence.updated"). Les abonnements
+  /// Type d'evenement declencheur (ex: "monitoring.duty", "absence.updated"). Les abonnements
   /// "personnalises" (voir `label`) utilisent tous la valeur fixe "custom" : jamais declenches
   /// par un evenement integre du bot, seulement envoyes a la demande du staff
   /// (`dispatchCustomWebhook`) ou automatiquement par une synchronisation de Google Sheet

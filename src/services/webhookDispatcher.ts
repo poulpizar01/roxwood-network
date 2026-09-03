@@ -10,9 +10,9 @@ import { logger } from "../utils/logger.js";
 
 /** Types d'evenements pouvant declencher l'envoi d'un webhook. */
 export type WebhookEventType =
-  | "monitoring.shift"
+  | "monitoring.duty"
   | "monitoring.recruitment"
-  | "monitoring.safe"
+  | "monitoring.storage"
   | "monitoring.invoice"
   | "monitoring.sale"
   | "absence.updated"
@@ -26,9 +26,9 @@ export type WebhookEventType =
  * plutot qu'un bouton "Ajouter un webhook" disperse sur chaque panneau concerne).
  */
 export const WEBHOOK_EVENT_LABELS: Record<WebhookEventType, string> = {
-  "monitoring.shift": "Prise de service (Monitoring)",
+  "monitoring.duty": "Prise de service (Monitoring)",
   "monitoring.recruitment": "Recrutement (Monitoring)",
-  "monitoring.safe": "Coffre (Monitoring)",
+  "monitoring.storage": "Coffre (Monitoring)",
   "monitoring.invoice": "Facture (Monitoring)",
   "monitoring.sale": "Vente run (Monitoring)",
   "absence.updated": "Absences",

@@ -28,9 +28,9 @@ import { logger } from "../utils/logger.js";
  */
 
 const WEBHOOK_EVENT_BY_TYPE: Record<MonitoringLogType, WebhookEventType> = {
-  SHIFT: "monitoring.shift",
+  SHIFT: "monitoring.duty",
   RECRUITMENT: "monitoring.recruitment",
-  SAFE: "monitoring.safe",
+  SAFE: "monitoring.storage",
   INVOICE: "monitoring.invoice",
   SALE: "monitoring.sale",
 };

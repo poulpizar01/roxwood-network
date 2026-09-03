@@ -5,7 +5,7 @@ import { prisma } from "../db/prisma.js";
  * alimente par `monitoringService.ingestMonitoringMessage` sur les logs de type SAFE. Pas de
  * lecture cote Discord (l'ancienne commande `/stock` a ete retiree — accessible a tout membre
  * du serveur sans role requis, jugee trop exposee pour une donnee d'entreprise) : le stock
- * n'est aujourd'hui consultable que via le webhook sortant `monitoring.safe` (voir
+ * n'est aujourd'hui consultable que via le webhook sortant `monitoring.storage` (voir
  * `webhookDispatcher.ts`), cote site externe.
  */
 
@@ -48,7 +48,7 @@ export async function listSafes(guildId: string) {
 
 /**
  * Stock courant d'un seul item dans un coffre, juste apres un mouvement — utilise pour
- * enrichir le webhook sortant `monitoring.safe` d'un niveau de stock plutot que du seul
+ * enrichir le webhook sortant `monitoring.storage` d'un niveau de stock plutot que du seul
  * mouvement ponctuel (voir `monitoringService.applySideEffect`).
  */
 export async function getItemStock(safeId: string, itemId: string): Promise<number> {
