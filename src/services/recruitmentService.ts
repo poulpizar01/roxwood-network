@@ -1,5 +1,7 @@
 import type { ApplicationStatus } from "@prisma/client";
 import { prisma } from "../db/prisma.js";
+import { getTicketById } from "./ticketService.js";
+import { dispatchWebhook } from "./webhookDispatcher.js";
 
 /**
  * Service dedie au flux de recrutement : une `RecruitmentApplication` (1:1 avec un `Ticket`
@@ -7,6 +9,32 @@ import { prisma } from "../db/prisma.js";
  * au formulaire (`RecruitmentAnswer[]`) et les pieces jointes envoyees par le candidat
  * (`RecruitmentAttachment[]`).
  */
+
+/**
+ * Envoie l'etat complet et courant d'une candidature sur l'unique evenement
+ * `recruitment.updated` — meme principe que `absence.updated`/`order.updated` : un recepteur
+ * n'a qu'un seul type d'evenement a ecouter pour toujours avoir la derniere version d'une
+ * candidature, sans fusionner plusieurs evenements lui-meme. Les octets des pieces jointes ne
+ * sont jamais inclus (juste leur nom) : le JSON du webhook n'est pas fait pour transporter du
+ * binaire, seul le nom permet au recepteur de savoir qu'un fichier existe. No-op silencieux
+ * si le ticket/la candidature n'existe plus (ne devrait pas arriver en usage normal).
+ */
+async function dispatchRecruitmentUpdated(ticketId: string): Promise<void> {
+  const ticket = await getTicketById(ticketId);
+  const application = await getApplication(ticketId);
+  if (!ticket || !application) return;
+
+  await dispatchWebhook(ticket.guildId, "recruitment.updated", {
+    ticketId,
+    channelId: ticket.channelId,
+    candidateId: ticket.openerId,
+    status: application.status,
+    recruiterId: application.recruiterId,
+    submittedAt: application.submittedAt?.toISOString() ?? null,
+    answers: application.answers.map((a) => ({ question: a.question, answer: a.answer })),
+    attachments: application.attachments.map((a) => ({ filename: a.filename })),
+  });
+}
 
 /**
  * Cree la candidature associee a un ticket, juste apres sa detection (voir `onChannelCreate`).
@@ -32,21 +60,27 @@ export async function saveAnswers(ticketId: string, answers: { question: string;
     data: answers.map((a) => ({ applicationId: application.id, question: a.question, answer: a.answer })),
   });
 
-  return prisma.recruitmentApplication.update({
+  const updated = await prisma.recruitmentApplication.update({
     where: { id: application.id },
     data: { submittedAt: new Date() },
     include: { answers: true, attachments: true },
   });
+  await dispatchRecruitmentUpdated(ticketId);
+  return updated;
 }
 
 /** Fait avancer la candidature dans le pipeline (PENDING / INTERVIEW / ACCEPTED / REJECTED). */
 export async function setStatus(ticketId: string, status: ApplicationStatus) {
-  return prisma.recruitmentApplication.update({ where: { ticketId }, data: { status } });
+  const updated = await prisma.recruitmentApplication.update({ where: { ticketId }, data: { status } });
+  await dispatchRecruitmentUpdated(ticketId);
+  return updated;
 }
 
 /** Assigne un membre du staff comme recruteur responsable de cette candidature (reassignation possible). */
 export async function assignRecruiter(ticketId: string, recruiterId: string) {
-  return prisma.recruitmentApplication.update({ where: { ticketId }, data: { recruiterId } });
+  const updated = await prisma.recruitmentApplication.update({ where: { ticketId }, data: { recruiterId } });
+  await dispatchRecruitmentUpdated(ticketId);
+  return updated;
 }
 
 /**
@@ -66,7 +100,9 @@ export async function saveLogMessageRef(ticketId: string, logChannelId: string, 
  */
 export async function addAttachment(ticketId: string, data: Buffer, filename: string) {
   const application = await prisma.recruitmentApplication.findUniqueOrThrow({ where: { ticketId } });
-  return prisma.recruitmentAttachment.create({ data: { applicationId: application.id, data, filename } });
+  const attachment = await prisma.recruitmentAttachment.create({ data: { applicationId: application.id, data, filename } });
+  await dispatchRecruitmentUpdated(ticketId);
+  return attachment;
 }
 
 /** Recupere la candidature d'un ticket avec ses reponses et pieces jointes, ou `null` si aucune n'existe. */

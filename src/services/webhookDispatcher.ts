@@ -17,6 +17,7 @@ export type WebhookEventType =
   | "monitoring.sale"
   | "absence.updated"
   | "order.updated"
+  | "recruitment.updated"
   | "custom";
 
 /**
@@ -33,6 +34,7 @@ export const WEBHOOK_EVENT_LABELS: Record<WebhookEventType, string> = {
   "monitoring.sale": "Vente run (Monitoring)",
   "absence.updated": "Absences",
   "order.updated": "Commandes",
+  "recruitment.updated": "Candidatures",
   custom: "Personnalisé (contenu au choix)",
 };
 
